@@ -1,0 +1,731 @@
+import { HLC } from '../types/candles'
+import { LinesResult, PriorPivotResult } from '../types/result'
+import {
+  Float64CircularArray,
+  LightIndicator,
+  PivotCalculator,
+  crossover,
+  crossunder,
+  hlcValue,
+} from '../util'
+
+/**
+ * Enum for PriorPivot state indices in Float64Array
+ */
+enum PriorPivotState {
+  // Current trend state
+  TREND = 0,
+  INTERNAL_TREND = 1,
+
+  // Trailing values
+  TRAILING_UP = 2,
+  TRAILING_DOWN = 3,
+
+  // Cross flags
+  TOP_CROSS = 4,
+  BTM_CROSS = 5,
+  ITOP_CROSS = 6,
+  IBTM_CROSS = 7,
+
+  // Value when base indices
+  VALUE_WHEN_BASE = 8,
+  // 8-50: reserved for valuewhen values
+
+  // Swing value base indices
+  SWING_VALUE_BASE = 51,
+  // 51-60: reserved for swing values
+
+  // State array size
+  STATE_SIZE = 61,
+}
+
+/**
+ * Support Resistance
+ */
+export class PriorPivot extends LightIndicator<PriorPivotResult, HLC> {
+  private readonly highArray: Float64CircularArray
+  private readonly lowArray: Float64CircularArray
+  private readonly pivotHighHistory: Float64CircularArray
+  private readonly pivotLowHistory: Float64CircularArray
+  private readonly topY: Float64CircularArray
+  private readonly btmY: Float64CircularArray
+  private readonly closeHist: Float64CircularArray
+  private readonly SphResHist: Float64CircularArray
+  private readonly SplResHist: Float64CircularArray
+  private readonly IphResHist: Float64CircularArray
+  private readonly IplResHist: Float64CircularArray
+  private readonly ItopY: Float64CircularArray
+  private readonly IbtmY: Float64CircularArray
+  private readonly pivotCalculatorHigh: PivotCalculator
+  private readonly pivotCalculatorLow: PivotCalculator
+  private maxLen = 1000
+  private currentH?: 'hh' | 'lh'
+  private currentL?: 'hl' | 'll'
+  private ScurrentH?: 'hh' | 'lh'
+  private ScurrentL?: 'hl' | 'll'
+  private IcurrentH?: 'hh' | 'lh'
+  private IcurrentL?: 'hl' | 'll'
+  private currentWSL?: 'sl' | 'wl'
+  private currentWSH?: 'sh' | 'wh'
+  private allResults: LinesResult = {
+    hh: NaN,
+    hl: NaN,
+    ll: NaN,
+    lh: NaN,
+    sl: NaN,
+    wl: NaN,
+    sh: NaN,
+    wh: NaN,
+  }
+  private market: PriorPivotResult['market'] | null = null
+  constructor(
+    public readonly highLeftBars: number,
+    public readonly highRightBars: number,
+    public readonly lowLeftBars: number,
+    public readonly lowRightBars: number,
+    public readonly mult = 1000,
+  ) {
+    super(1, hlcValue, PriorPivotState.STATE_SIZE)
+
+    // Initialize state properties
+    const s = this._state
+    s[PriorPivotState.TREND] = 0
+    s[PriorPivotState.INTERNAL_TREND] = 0
+    s[PriorPivotState.TRAILING_UP] = 0
+    s[PriorPivotState.TRAILING_DOWN] = 0
+    s[PriorPivotState.TOP_CROSS] = 0
+    s[PriorPivotState.BTM_CROSS] = 0
+    s[PriorPivotState.ITOP_CROSS] = 0
+    s[PriorPivotState.IBTM_CROSS] = 0
+
+    const rangeHigh = this.highLeftBars + this.highRightBars
+    const lowRange = this.lowLeftBars + this.lowRightBars
+    this.highArray = new Float64CircularArray(Math.max(52, rangeHigh + 1), NaN)
+    this.lowArray = new Float64CircularArray(Math.max(52, lowRange + 1), NaN)
+    this.pivotHighHistory = new Float64CircularArray(this.maxLen, NaN)
+    this.pivotLowHistory = new Float64CircularArray(this.maxLen, NaN)
+    this.topY = new Float64CircularArray(2, NaN)
+    this.btmY = new Float64CircularArray(2, NaN)
+    this.closeHist = new Float64CircularArray(2, NaN)
+    this.SphResHist = new Float64CircularArray(2, NaN)
+    this.SplResHist = new Float64CircularArray(2, NaN)
+    this.IphResHist = new Float64CircularArray(2, NaN)
+    this.IplResHist = new Float64CircularArray(2, NaN)
+    this.ItopY = new Float64CircularArray(2, NaN)
+    this.IbtmY = new Float64CircularArray(2, NaN)
+    this.pivotCalculatorHigh = new PivotCalculator(
+      this.highLeftBars,
+      this.highRightBars,
+      'high',
+    )
+    this.pivotCalculatorLow = new PivotCalculator(
+      this.lowLeftBars,
+      this.lowRightBars,
+      'low',
+    )
+  }
+
+  private pivotHigh() {
+    let offset = 0
+    while (offset < this.maxLen) {
+      const index =
+        (this.pivotHighHistory.prevIndex - offset + this.maxLen) %
+        this.pivotHighHistory.size
+      if (!isNaN(this.pivotHighHistory.array[index])) {
+        break
+      }
+      offset++
+    }
+    const finalIndex =
+      (this.pivotHighHistory.prevIndex - offset + this.maxLen) %
+      this.pivotHighHistory.size
+    return this.pivotHighHistory.array[finalIndex]
+  }
+
+  private pivotLow() {
+    let offset = 0
+    while (offset < this.maxLen) {
+      const index =
+        (this.pivotLowHistory.prevIndex - offset + this.maxLen) %
+        this.pivotLowHistory.size
+      if (!isNaN(this.pivotLowHistory.array[index])) {
+        break
+      }
+      offset++
+    }
+    const finalIndex =
+      (this.pivotLowHistory.prevIndex - offset + this.maxLen) %
+      this.pivotLowHistory.size
+    return this.pivotLowHistory.array[finalIndex]
+  }
+
+  /**
+   * Get index for a specific value when type in the state array
+   * @param type The unique key for this value when
+   * @returns Index in state array
+   */
+  private getValueWhenIndex(type: string): number {
+    // Simple hash function to map string keys to numeric indices
+    const hash = Array.from(type).reduce(
+      (acc, char) => acc + char.charCodeAt(0),
+      0,
+    )
+    return PriorPivotState.VALUE_WHEN_BASE + (hash % 40) // 40 slots for value when
+  }
+
+  /**
+   * Store and retrieve values when a condition is true
+   * @param bool Condition to check
+   * @param val Value to store if condition is true
+   * @param count Position to retrieve (0 = latest, 1 = previous)
+   * @param type Unique identifier for this valuewhen
+   * @returns Value at the requested position
+   */
+  private valuewhen(
+    bool: boolean,
+    val: number,
+    count: number,
+    type: string,
+  ): number {
+    const s = this._state
+    const index = this.getValueWhenIndex(type)
+
+    // When condition is true, store value
+    if (bool) {
+      // Shift values - we only keep two
+      s[index + 1] = s[index]
+      s[index] = val
+    }
+
+    // Retrieve the value at specified position
+    if (count === 0) return s[index]
+    if (count === 1) return s[index + 1]
+    return NaN
+  }
+
+  /**
+   * Get index for a specific swing type in the state array
+   * @param type Swing type
+   * @returns Index in state array
+   */
+  private getSwingValueIndex(type: 'internal' | 'swing'): number {
+    return PriorPivotState.SWING_VALUE_BASE + (type === 'internal' ? 0 : 5)
+  }
+
+  /**
+   * Calculate swing values using high/low arrays
+   * @param _len Length to use for swing calculation
+   * @param type Type of swing to calculate
+   * @returns Array with top and bottom values
+   */
+  private swings = (
+    _len: number,
+    type: 'internal' | 'swing',
+  ): [number, number] => {
+    const s = this._state
+    const baseIndex = this.getSwingValueIndex(type)
+
+    const len = _len + 1
+
+    // Extract high values from circular array
+    const high: number[] = []
+    for (let i = 0; i <= len; i++) {
+      const idx =
+        (this.highArray.prevIndex - i + this.highArray.size) %
+        this.highArray.size
+      high.push(this.highArray.array[idx])
+    }
+
+    // Extract low values from circular array
+    const low: number[] = []
+    for (let i = 0; i <= len; i++) {
+      const idx =
+        (this.lowArray.prevIndex - i + this.lowArray.size) % this.lowArray.size
+      low.push(this.lowArray.array[idx])
+    }
+
+    // Calculate upper and lower bounds
+    const upper = Math.max(...high.slice(1))
+    const lower = Math.min(...low.slice(1))
+
+    // Get previous swing values
+    const swingVar = [s[baseIndex], s[baseIndex + 1]]
+
+    // Calculate current oscillator value
+    const currentOs = high[0] > upper ? 0 : low[0] < lower ? 1 : swingVar[1]
+
+    // Calculate top and bottom values
+    const top = currentOs === 0 && swingVar[0] !== 0 ? high[0] : NaN
+    const btm = currentOs === 1 && swingVar[0] !== 1 ? low[0] : NaN
+
+    // Store current swing state
+    s[baseIndex] = currentOs
+    s[baseIndex + 1] = currentOs
+
+    return [top, btm]
+  }
+
+  calculate(): PriorPivotResult | null {
+    const s = this._state
+    const l = this._history.last
+    this.highArray.add(l.high)
+    this.lowArray.add(l.low)
+    this.closeHist.add(l.close)
+    let pivotHigh = this.pivotCalculatorHigh.calculate(
+      this.highArray.normalizedArray,
+    )
+    let pivotLow = this.pivotCalculatorLow.calculate(
+      this.lowArray.normalizedArray,
+    )
+    this.pivotHighHistory.add(pivotHigh)
+    this.pivotLowHistory.add(pivotLow)
+    const phRes = this.pivotHigh() * this.mult
+    const plRes = this.pivotLow() * this.mult
+    // Get high and low values for the valuewhen function
+    const highIndex =
+      (this.highArray.prevIndex - this.highLeftBars + this.highArray.size) %
+      this.highArray.size
+    const highValue = this.highArray.array[highIndex]
+
+    const lowIndex =
+      (this.lowArray.prevIndex - this.lowLeftBars + this.lowArray.size) %
+      this.lowArray.size
+    const lowValue = this.lowArray.array[lowIndex]
+
+    const hhValueWhen1 = this.valuewhen(!isNaN(pivotHigh), highValue, 1, 'hh1')
+    const hhValueWhen2 = this.valuewhen(!isNaN(pivotHigh), highValue, 0, 'hh2')
+    const hlValueWhen1 = this.valuewhen(!isNaN(pivotLow), lowValue, 1, 'hl1')
+    const hlValueWhen2 = this.valuewhen(!isNaN(pivotLow), lowValue, 0, 'hl2')
+    const lhValueWhen1 = this.valuewhen(!isNaN(pivotHigh), highValue, 1, 'lh1')
+    const lhValueWhen2 = this.valuewhen(!isNaN(pivotHigh), highValue, 0, 'lh2')
+    const llValueWhen1 = this.valuewhen(!isNaN(pivotLow), lowValue, 1, 'll1')
+    const llValueWhen2 = this.valuewhen(!isNaN(pivotLow), lowValue, 0, 'll2')
+    const hh = isNaN(pivotHigh)
+      ? NaN
+      : hhValueWhen1 < hhValueWhen2
+        ? pivotHigh
+        : NaN
+
+    const hl = isNaN(pivotLow)
+      ? NaN
+      : hlValueWhen1 < hlValueWhen2
+        ? pivotLow
+        : NaN
+
+    const lh = isNaN(pivotHigh)
+      ? NaN
+      : lhValueWhen1 > lhValueWhen2
+        ? pivotHigh
+        : NaN
+
+    const ll = isNaN(pivotLow)
+      ? NaN
+      : llValueWhen1 > llValueWhen2
+        ? pivotLow
+        : NaN
+    if (!isNaN(hh)) {
+      this.currentH = 'hh'
+    }
+    if (!isNaN(hl)) {
+      this.currentL = 'hl'
+    }
+    if (!isNaN(lh)) {
+      this.currentH = 'lh'
+    }
+    if (!isNaN(ll)) {
+      this.currentL = 'll'
+    }
+    const [top, btm] = this.swings(50, 'swing')
+    const [Itop, Ibtm] = this.swings(5, 'internal')
+    let Shh = NaN
+    let Slh = NaN
+    let Sll = NaN
+    let Shl = NaN
+    let Ihh = NaN
+    let Ilh = NaN
+    let Ill = NaN
+    let Ihl = NaN
+    let newTrend = 0
+    let InewTrend = 0
+    if (top && !isNaN(top)) {
+      // Set top cross flag
+      s[PriorPivotState.TOP_CROSS] = 1
+
+      // Check topY values to determine swing type
+      if (top > this.topY.array[1]) {
+        Shh = top
+      } else {
+        Slh = top
+      }
+
+      // Update topY values using add method
+      this.topY.add(top)
+      this.topY.add(top)
+
+      // Update trailing up value
+      s[PriorPivotState.TRAILING_UP] = top
+    }
+
+    if (btm && !isNaN(btm)) {
+      // Set bottom cross flag
+      s[PriorPivotState.BTM_CROSS] = 1
+
+      // Check btmY values to determine swing type
+      if (btm < this.btmY.array[1]) {
+        Sll = btm
+      } else {
+        Shl = btm
+      }
+
+      // Update btmY values using add method
+      this.btmY.add(btm)
+      this.btmY.add(btm)
+
+      // Update trailing down value
+      s[PriorPivotState.TRAILING_DOWN] = btm
+    }
+
+    // Create arrays from circular buffers for crossover/crossunder functions
+    const closeHistArr = [
+      this.closeHist.array[this.closeHist.prevIndex],
+      this.closeHist.array[
+        (this.closeHist.prevIndex - 1 + this.closeHist.size) %
+          this.closeHist.size
+      ],
+    ]
+    const topYArr = [
+      this.topY.array[this.topY.prevIndex],
+      this.topY.array[
+        (this.topY.prevIndex - 1 + this.topY.size) % this.topY.size
+      ],
+    ]
+    const btmYArr = [
+      this.btmY.array[this.btmY.prevIndex],
+      this.btmY.array[
+        (this.btmY.prevIndex - 1 + this.btmY.size) % this.btmY.size
+      ],
+    ]
+
+    if (crossover(closeHistArr, topYArr)) {
+      if (s[PriorPivotState.TOP_CROSS] === 1) {
+        newTrend = 1
+      }
+      s[PriorPivotState.TOP_CROSS] = 0
+    }
+
+    if (crossunder(closeHistArr, btmYArr)) {
+      if (s[PriorPivotState.BTM_CROSS] === 1) {
+        newTrend = -1
+      }
+      s[PriorPivotState.BTM_CROSS] = 0
+    }
+
+    if (Itop && !isNaN(Itop)) {
+      // Set internal top cross flag
+      s[PriorPivotState.ITOP_CROSS] = 1
+
+      // Check ItopY values to determine swing type
+      if (Itop > this.ItopY.array[1]) {
+        Ihh = Itop
+      } else {
+        Ilh = Itop
+      }
+
+      // Update ItopY values using add method
+      this.ItopY.add(Itop)
+      this.ItopY.add(Itop)
+    }
+
+    if (Ibtm && !isNaN(Ibtm)) {
+      // Set internal bottom cross flag
+      s[PriorPivotState.IBTM_CROSS] = 1
+
+      // Check IbtmY values to determine swing type
+      if (Ibtm < this.IbtmY.array[1]) {
+        Ill = Ibtm
+      } else {
+        Ihl = Ibtm
+      }
+
+      // Update IbtmY values using add method
+      this.IbtmY.add(Ibtm)
+      this.IbtmY.add(Ibtm)
+    }
+
+    // Create arrays for internal crossovers/crossunders
+    const ItopYArr = [
+      this.ItopY.array[this.ItopY.prevIndex],
+      this.ItopY.array[
+        (this.ItopY.prevIndex - 1 + this.ItopY.size) % this.ItopY.size
+      ],
+    ]
+    const IbtmYArr = [
+      this.IbtmY.array[this.IbtmY.prevIndex],
+      this.IbtmY.array[
+        (this.IbtmY.prevIndex - 1 + this.IbtmY.size) % this.IbtmY.size
+      ],
+    ]
+    const topYFirstVal = this.topY.array[this.topY.prevIndex]
+
+    if (crossover(closeHistArr, ItopYArr)) {
+      if (s[PriorPivotState.ITOP_CROSS] === 1 && Itop !== topYFirstVal) {
+        InewTrend = 1
+      }
+      s[PriorPivotState.ITOP_CROSS] = 0
+    }
+
+    if (crossunder(closeHistArr, IbtmYArr)) {
+      if (s[PriorPivotState.IBTM_CROSS] === 1 && Ibtm !== btmYArr[0]) {
+        InewTrend = -1
+      }
+      s[PriorPivotState.IBTM_CROSS] = 0
+    }
+    // Get trend value from state
+    const trend = s[PriorPivotState.TREND]
+
+    // Determine label types based on trend
+    const SlLabel = btm && trend > 0
+    const WLLabel = btm && trend <= 0
+    const SHLabel = top && trend < 0
+    const WHLabel = top && trend >= 0
+
+    // Update trailing values
+    const currentHigh = this.highArray.array[this.highArray.prevIndex]
+    const currentLow = this.lowArray.array[this.lowArray.prevIndex]
+
+    // Update trailing up (max value)
+    s[PriorPivotState.TRAILING_UP] = Math.max(
+      s[PriorPivotState.TRAILING_UP],
+      currentHigh,
+    )
+
+    // Update trailing down (min value)
+    s[PriorPivotState.TRAILING_DOWN] = Math.min(
+      s[PriorPivotState.TRAILING_DOWN],
+      currentLow,
+    )
+    if (SlLabel) {
+      this.currentWSL = 'sl'
+    }
+    if (WLLabel) {
+      this.currentWSL = 'wl'
+    }
+    if (SHLabel) {
+      this.currentWSH = 'sh'
+    }
+    if (WHLabel) {
+      this.currentWSH = 'wh'
+    }
+
+    let SphRes = NaN
+    let SplRes = NaN
+    if (!isNaN(Shh)) {
+      this.ScurrentH = 'hh'
+      SphRes = Shh
+    }
+    if (!isNaN(Slh)) {
+      this.ScurrentH = 'lh'
+      SphRes = Slh
+    }
+    if (!isNaN(Sll)) {
+      this.ScurrentL = 'll'
+      SplRes = Sll
+    }
+    if (!isNaN(Shl)) {
+      this.ScurrentL = 'hl'
+      SplRes = Shl
+    }
+
+    if (!isNaN(SphRes)) {
+      this.SphResHist.add(SphRes)
+      this.SphResHist.add(SphRes)
+    }
+    if (!isNaN(SplRes)) {
+      this.SplResHist.add(SplRes)
+      this.SplResHist.add(SplRes)
+    }
+
+    // Create arrays from circular buffers for crossover/crossunder functions
+    const SphResHistArr = [
+      this.SphResHist.array[this.SphResHist.prevIndex],
+      this.SphResHist.array[
+        (this.SphResHist.prevIndex - 1 + this.SphResHist.size) %
+          this.SphResHist.size
+      ],
+    ]
+    const SplResHistArr = [
+      this.SplResHist.array[this.SplResHist.prevIndex],
+      this.SplResHist.array[
+        (this.SplResHist.prevIndex - 1 + this.SplResHist.size) %
+          this.SplResHist.size
+      ],
+    ]
+
+    const bullBoS =
+      s[PriorPivotState.TREND] >= 0 &&
+      crossover(closeHistArr, SphResHistArr) &&
+      this.ScurrentH
+    const bearBoS =
+      s[PriorPivotState.TREND] <= 0 &&
+      crossunder(closeHistArr, SplResHistArr) &&
+      this.ScurrentL
+    const bullCHoCH =
+      s[PriorPivotState.TREND] < 0 &&
+      crossover(closeHistArr, SphResHistArr) &&
+      this.ScurrentH
+    const bearCHoCH =
+      s[PriorPivotState.TREND] > 0 &&
+      crossunder(closeHistArr, SplResHistArr) &&
+      this.ScurrentL
+    if (bullBoS || bullCHoCH) {
+      this.ScurrentH = undefined
+    }
+    if (bearBoS || bearCHoCH) {
+      this.ScurrentL = undefined
+    }
+    if (bullCHoCH) {
+      this.market = 'bull'
+    }
+    if (bearCHoCH) {
+      this.market = 'bear'
+    }
+    let IphRes = NaN
+    let IplRes = NaN
+    if (!isNaN(Ihh)) {
+      this.IcurrentH = 'hh'
+      IphRes = Ihh
+    }
+    if (!isNaN(Ilh)) {
+      this.IcurrentH = 'lh'
+      IphRes = Ilh
+    }
+    if (!isNaN(Ill)) {
+      this.IcurrentL = 'll'
+      IplRes = Ill
+    }
+    if (!isNaN(Ihl)) {
+      this.IcurrentL = 'hl'
+      IplRes = Ihl
+    }
+
+    if (!isNaN(IphRes)) {
+      this.IphResHist.add(IphRes)
+      this.IphResHist.add(IphRes)
+    }
+    if (!isNaN(IplRes)) {
+      this.IplResHist.add(IplRes)
+      this.IplResHist.add(IplRes)
+    }
+
+    // Create arrays for internal indicators
+    const IphResHistArr = [
+      this.IphResHist.array[this.IphResHist.prevIndex],
+      this.IphResHist.array[
+        (this.IphResHist.prevIndex - 1 + this.IphResHist.size) %
+          this.IphResHist.size
+      ],
+    ]
+    const IplResHistArr = [
+      this.IplResHist.array[this.IplResHist.prevIndex],
+      this.IplResHist.array[
+        (this.IplResHist.prevIndex - 1 + this.IplResHist.size) %
+          this.IplResHist.size
+      ],
+    ]
+
+    // Get internal trend from state
+    const Itrend = s[PriorPivotState.INTERNAL_TREND]
+
+    const IbullBoS =
+      Itrend >= 0 && crossover(closeHistArr, IphResHistArr) && this.IcurrentH
+    const IbearBoS =
+      Itrend <= 0 && crossunder(closeHistArr, IplResHistArr) && this.IcurrentL
+    const IbullCHoCH =
+      Itrend < 0 && crossover(closeHistArr, IphResHistArr) && this.IcurrentH
+    const IbearCHoCH =
+      Itrend > 0 && crossunder(closeHistArr, IplResHistArr) && this.IcurrentL
+
+    // Update current states
+    if (IbullBoS || IbullCHoCH) {
+      this.IcurrentH = undefined
+    }
+    if (IbearBoS || IbearCHoCH) {
+      this.IcurrentL = undefined
+    }
+
+    // Update trend flags in state
+    if (newTrend) {
+      s[PriorPivotState.TREND] = newTrend
+    }
+    if (IbearCHoCH) {
+      s[PriorPivotState.INTERNAL_TREND] = -1
+    } else if (IbullCHoCH) {
+      s[PriorPivotState.INTERNAL_TREND] = 1
+    } else if (InewTrend) {
+      s[PriorPivotState.INTERNAL_TREND] = InewTrend
+    }
+    // Calculate result values
+    const hhRes = this.currentH === 'hh' ? phRes : NaN
+    const hlRes = this.currentL === 'hl' ? plRes : NaN
+    const llRes = this.currentL === 'll' ? plRes : NaN
+    const lhRes = this.currentH === 'lh' ? phRes : NaN
+
+    // Use trailing values from state
+    const trailingDown = s[PriorPivotState.TRAILING_DOWN]
+    const trailingUp = s[PriorPivotState.TRAILING_UP]
+
+    const slRes = this.currentWSL === 'sl' ? trailingDown * this.mult : NaN
+    const wlRes = this.currentWSL === 'wl' ? trailingDown * this.mult : NaN
+    const shRes = this.currentWSH === 'sh' ? trailingUp * this.mult : NaN
+    const whRes = this.currentWSH === 'wh' ? trailingUp * this.mult : NaN
+
+    // Update all results
+    if (!isNaN(hhRes)) {
+      this.allResults.hh = hhRes
+    }
+    if (!isNaN(hlRes)) {
+      this.allResults.hl = hlRes
+    }
+    if (!isNaN(llRes)) {
+      this.allResults.ll = llRes
+    }
+    if (!isNaN(lhRes)) {
+      this.allResults.lh = lhRes
+    }
+    if (!isNaN(slRes)) {
+      this.allResults.sl = slRes
+    }
+    if (!isNaN(wlRes)) {
+      this.allResults.wl = wlRes
+    }
+    if (!isNaN(whRes)) {
+      this.allResults.wh = whRes
+    }
+    if (!isNaN(shRes)) {
+      this.allResults.sh = shRes
+    }
+
+    // Return final result
+    return {
+      hh: hhRes,
+      hl: hlRes,
+      ll: llRes,
+      lh: lhRes,
+      sl: slRes,
+      wl: wlRes,
+      sh: shRes,
+      wh: whRes,
+      sBearBoS: !!bearBoS,
+      sBullBoS: !!bullBoS,
+      sBearCHoCH: !!bearCHoCH,
+      sBullCHoCH: !!bullCHoCH,
+      iBearBoS: !!IbearBoS,
+      iBullBoS: !!IbullBoS,
+      iBearCHoCH: !!IbearCHoCH,
+      iBullCHoCH: !!IbullCHoCH,
+      market: this.market,
+      price: l.close,
+      all: this.allResults,
+    }
+  }
+}

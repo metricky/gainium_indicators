@@ -1,0 +1,102 @@
+# Changelog
+
+All notable changes to the Gainium Technical Indicators library will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2025-05-29
+
+### Added
+- Initial open source release
+- 45+ comprehensive technical indicators
+- LightIndicator base class architecture
+- Complete TypeScript support with detailed type definitions
+- State management system for persistence
+- Comprehensive JSDoc documentation for all indicators
+- High-performance implementation with circular buffers
+- Real-time streaming data support
+
+### Indicators Included
+
+#### Trend Following
+- Simple Moving Average (SMA)
+- Exponential Moving Average (EMA)
+- Weighted Moving Average (WMA)
+- Volume Weighted Moving Average (VWMA)
+- Hull Moving Average (HMA)
+- Triple Exponential Moving Average (TEMA)
+- Double Exponential Moving Average (DEMA)
+- Wilder's Smoothed Moving Average (WSMA)
+- Running Moving Average (RMA)
+
+#### Momentum & Oscillators
+- Relative Strength Index (RSI)
+- Stochastic Oscillator (STOCH)
+- Stochastic RSI (StochasticRSI)
+- Commodity Channel Index (CCI)
+- Williams %R (WR)
+- Ultimate Oscillator (UO)
+- Awesome Oscillator (AO)
+- Momentum (MOM)
+- Money Flow Index (MFI)
+
+#### Volatility
+- Average True Range (ATR)
+- True Range (TR)
+- Bollinger Bands (BBANDS)
+- Bollinger Bands Width (BBW)
+- Bollinger Bands Width Percentile (BBWP)
+- Bollinger Bands %B (BBPB)
+- Keltner Channels (KC)
+- Keltner Channels %B (KCPB)
+- Donchian Channels (DC)
+
+#### Trend & Signal
+- Moving Average Convergence Divergence (MACD)
+- Average Directional Index (ADX)
+- SuperTrend
+- Parabolic SAR (PSAR)
+- Ichimoku Cloud
+- Bull/Bear Power (BullBear)
+
+#### Volume
+- Volume Oscillator (VO)
+- Rolling Sum (Sum)
+
+#### Support/Resistance & Levels
+- Support/Resistance (SupportResistance)
+- Prior Pivot Points (PriorPivot)
+- All Time High (ATH)
+- Extremum detection
+
+#### Composite & Utility
+- TradingView Technical Analysis (TVTA)
+- Quickfingersluc Base Finder (QFL)
+- Median Absolute Deviation (MAD)
+- Moving Average Ratio (MAR)
+- Divergence Detection (DIV)
+- Price Channel (PC)
+- Elder Channel Divergence (ECD)
+- Average Daily Range (ADR)
+
+### Features
+- Memory-efficient circular buffer implementation
+- O(1) complexity for most operations
+- Complete state serialization/deserialization
+- TypeScript-first with comprehensive type safety
+- Professional-grade documentation
+- Battle-tested in production trading systems
+
+### Performance
+- Optimized for real-time trading applications
+- Minimal memory footprint with circular buffers
+- Efficient Float64Array usage for internal state
+- Handles thousands of instruments simultaneously
+
+### Documentation
+- Comprehensive README with usage examples
+- Detailed contributing guidelines
+- Complete API documentation with JSDoc
+- Trading interpretation for each indicator
+- Performance characteristics and best practices

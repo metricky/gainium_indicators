@@ -1,0 +1,75 @@
+{
+  "name": "@gainium/indicators",
+  "version": "1.0.0",
+  "description": "High-performance TypeScript technical indicators library for professional trading applications with 45+ indicators optimized for real-time systems",
+  "keywords": [
+    "technical-analysis",
+    "indicators",
+    "trading",
+    "typescript",
+    "cryptocurrency",
+    "stocks",
+    "forex",
+    "finance",
+    "rsi",
+    "macd",
+    "bollinger-bands",
+    "moving-average",
+    "oscillators",
+    "gainium"
+  ],
+  "author": {
+    "name": "Maksym Shamko",
+    "email": "maksym@gainium.io",
+    "url": "https://github.com/maksymshamko"
+  },
+  "organization": {
+    "name": "Gainium",
+    "url": "https://gainium.io/",
+    "github": "https://github.com/Gainium"
+  },
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gainium/indicators.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Gainium/indicators/issues"
+  },
+  "homepage": "https://github.com/Gainium/indicators#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "clean": "rm -rf dist",
+    "dev": "ts-node src/index.ts",
+    "lint": "tsc --project tsconfig.json --noEmit && eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepublishOnly": "npm run clean && npm run build",
+    "pull": "git pull origin main",
+    "push": "git push origin main"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.24",
+    "@typescript-eslint/eslint-plugin": "^8.33.0",
+    "@typescript-eslint/parser": "^8.33.0",
+    "eslint": "^9.27.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.0",
+    "prettier": "^3.5.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,33 @@
+# Source files
+src/
+tsconfig.json
+.prettierrc.cjs
+eslint.config.mjs
+
+# Development files
+.DS_Store
+.git/
+.gitignore
+node_modules/
+yarn.lock
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+__tests__/
+*.test.ts
+*.spec.ts
+coverage/
+
+# Build artifacts (keep only dist/)
+lib/
+
+# Development scripts
+scripts/
+docs/
+examples/

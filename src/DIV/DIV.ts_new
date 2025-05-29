@@ -1,0 +1,883 @@
+import { MFI } from '../MFI/MFI'
+import { MACD } from '../MACD/MACD'
+import { EMA } from '../EMA/EMA'
+import { RSI } from '../RSI/RSI'
+import { CCI } from '../CCI/CCI'
+import { AO } from '../AO/AO'
+import { WilliamsR } from '../WR/WR'
+import { UltimateOscillator } from '../UO/UO'
+import { MOM } from '../MOM/MOM'
+import { StochasticOscillator } from '../STOCH/StochasticOscillator'
+import {
+  Float64CircularArray,
+  LightIndicator,
+  LightIndicatorState,
+  ohlcvValue,
+} from '../util'
+import { PivotCalculator } from '../util/pivot'
+import { DIVResult } from '../types/result'
+import { OHLCV } from '../types/candles'
+
+// Enum for DIV state indices in Float64Array
+enum DIVState {
+  // Result values
+  RESULT_NEG_DIVERGENCE = 0,
+  RESULT_POS_DIVERGENCE = 1,
+  RESULT_NEG_DIVERGENCE_HIDDEN = 2,
+  RESULT_POS_DIVERGENCE_HIDDEN = 3,
+
+  // For pivot tracking
+  PIVOT_INDEX = 4,
+
+  // Reserve range for oscillator types (9 types)
+  OSC_MFI = 10,
+  OSC_MACD = 11,
+  OSC_STOCH = 12,
+  OSC_RSI = 13,
+  OSC_CCI = 14,
+  OSC_AO = 15,
+  OSC_WR = 16,
+  OSC_UO = 17,
+  OSC_MOM = 18,
+
+  // Bars since ranges - allocate 10 per oscillator type (90 total)
+  BARS_SINCE_BASE = 20,
+  // 20-109: reserved for barssince values
+
+  // Value when ranges - allocate 10 per oscillator type (90 total)
+  VALUE_WHEN_BASE = 110,
+  // 110-199: reserved for valuewhen values
+
+  // For pivot tracking - 10 per oscillator type (90 total)
+  PIVOT_BASE = 200,
+  // 200-289: reserved for pivot tracking
+
+  // Size of state array
+  STATE_SIZE = 290,
+}
+
+export type DIVUsableOscillators =
+  | 'mfi'
+  | 'ao'
+  | 'wr'
+  | 'uo'
+  | 'mom'
+  | 'macd'
+  | 'rsi'
+  | 'cci'
+  | 'stoch'
+
+export class DIV extends LightIndicator<DIVResult, OHLCV> {
+  private mfi: MFI = new MFI(14)
+  private macd: MACD = new MACD(new EMA(12), new EMA(26), new EMA(9))
+  private stoch = new StochasticOscillator(14, 3, 1)
+  private rsi: RSI = new RSI(14)
+  private cci: CCI = new CCI(10, 'hlc3') // Fixed period to 10
+  private ao: AO = new AO(5, 34)
+  private wr: WilliamsR = new WilliamsR(14)
+  private uo: UltimateOscillator = new UltimateOscillator(7, 14, 28)
+  private mom: MOM = new MOM(10, 'close')
+
+  // Pivot calculators for high and low pivots on oscillator data
+  private readonly pivotHighCalculator: PivotCalculator
+  private readonly pivotLowCalculator: PivotCalculator
+
+  // High and low arrays as circular buffers
+  private readonly highArray: Float64CircularArray
+  private readonly lowArray: Float64CircularArray
+
+  // Oscillator histories as circular buffers - one for each oscillator type
+  private readonly oscMfi: Float64CircularArray
+  private readonly oscMacd: Float64CircularArray
+  private readonly oscStoch: Float64CircularArray
+  private readonly oscRsi: Float64CircularArray
+  private readonly oscCci: Float64CircularArray
+  private readonly oscAo: Float64CircularArray
+  private readonly oscWr: Float64CircularArray
+  private readonly oscUo: Float64CircularArray
+  private readonly oscMom: Float64CircularArray
+
+  // Oscillator types mapping for array indexing
+  private readonly oscTypeToIndex: Record<DIVUsableOscillators, number> = {
+    mfi: DIVState.OSC_MFI,
+    macd: DIVState.OSC_MACD,
+    stoch: DIVState.OSC_STOCH,
+    rsi: DIVState.OSC_RSI,
+    cci: DIVState.OSC_CCI,
+    ao: DIVState.OSC_AO,
+    wr: DIVState.OSC_WR,
+    uo: DIVState.OSC_UO,
+    mom: DIVState.OSC_MOM,
+  }
+
+  constructor(
+    private readonly oscillators: DIVUsableOscillators[],
+    public readonly leftBars: number,
+    public readonly rightBars: number,
+    public readonly rangeLower: number,
+    public readonly rangeUpper: number,
+  ) {
+    // Parent constructor requires historySize, initialValue, stateSize
+    super(1, ohlcvValue, DIVState.STATE_SIZE, NaN)
+    const range = leftBars + rightBars + 1
+    // Initialize the result values to zero
+    this._state[DIVState.RESULT_NEG_DIVERGENCE] = 0
+    this._state[DIVState.RESULT_POS_DIVERGENCE] = 0
+    this._state[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] = 0
+    this._state[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] = 0
+
+    // Initialize pivot calculators
+    this.pivotHighCalculator = new PivotCalculator(leftBars, rightBars, 'high')
+    this.pivotLowCalculator = new PivotCalculator(leftBars, rightBars, 'low')
+
+    // Initialize circular buffers
+    const bufferSize = leftBars + rightBars + 5 // Add some extra space
+    this.highArray = new Float64CircularArray(range, NaN)
+    this.lowArray = new Float64CircularArray(range, NaN)
+
+    // Initialize oscillator history buffers
+    this.oscMfi = new Float64CircularArray(bufferSize, NaN)
+    this.oscMacd = new Float64CircularArray(bufferSize, NaN)
+    this.oscStoch = new Float64CircularArray(bufferSize, NaN)
+    this.oscRsi = new Float64CircularArray(bufferSize, NaN)
+    this.oscCci = new Float64CircularArray(bufferSize, NaN)
+    this.oscAo = new Float64CircularArray(bufferSize, NaN)
+    this.oscWr = new Float64CircularArray(bufferSize, NaN)
+    this.oscUo = new Float64CircularArray(bufferSize, NaN)
+    this.oscMom = new Float64CircularArray(bufferSize, NaN)
+
+    // Initialize all barssince values to NaN (condition never met)
+    for (let i = DIVState.BARS_SINCE_BASE; i < DIVState.VALUE_WHEN_BASE; i++) {
+      this._state[i] = NaN
+    }
+
+    // Initialize all valuewhen values to NaN
+    for (let i = DIVState.VALUE_WHEN_BASE; i < DIVState.STATE_SIZE; i++) {
+      this._state[i] = NaN
+    }
+  }
+
+  /**
+   * Get the circular buffer for an oscillator type
+   * @param type Oscillator type
+   * @returns The corresponding circular buffer
+   */
+  private getOscBuffer(type: DIVUsableOscillators): Float64CircularArray {
+    switch (type) {
+      case 'mfi':
+        return this.oscMfi
+      case 'macd':
+        return this.oscMacd
+      case 'stoch':
+        return this.oscStoch
+      case 'rsi':
+        return this.oscRsi
+      case 'cci':
+        return this.oscCci
+      case 'ao':
+        return this.oscAo
+      case 'wr':
+        return this.oscWr
+      case 'uo':
+        return this.oscUo
+      case 'mom':
+        return this.oscMom
+      default:
+        return this.oscRsi // Fallback
+    }
+  }
+
+  /**
+   * Calculate an index in the state array for a bars since value
+   * @param oscType Oscillator type
+   * @param condType Condition type string
+   * @returns Index in the state array
+   */
+  private barsSinceIndex(
+    oscType: DIVUsableOscillators,
+    condType: string,
+  ): number {
+    // Create a unique mapping for each oscillator + condition combination
+    const oscIndex = this.oscTypeToIndex[oscType] - DIVState.OSC_MFI
+    const conditionHash = this.getConditionHash(condType)
+    return DIVState.BARS_SINCE_BASE + oscIndex * 10 + conditionHash
+  }
+
+  /**
+   * Calculate an index in the state array for a value when entry
+   * @param oscType Oscillator type
+   * @param condType Condition type string
+   * @returns Index in the state array
+   */
+  private valueWhenIndex(
+    oscType: DIVUsableOscillators,
+    condType: string,
+  ): number {
+    // Create a unique mapping for each oscillator + condition combination
+    const oscIndex = this.oscTypeToIndex[oscType] - DIVState.OSC_MFI
+    const conditionHash = this.getConditionHash(condType)
+    return DIVState.VALUE_WHEN_BASE + oscIndex * 10 + conditionHash
+  }
+
+  /**
+   * Calculate an index in the state array for a pivot tracking value
+   * @param oscType Oscillator type
+   * @param condType Condition type string
+   * @returns Index in the state array
+   */
+  private pivotIndex(oscType: DIVUsableOscillators, condType: string): number {
+    // Create a unique mapping for each oscillator + condition combination
+    const oscIndex = this.oscTypeToIndex[oscType] - DIVState.OSC_MFI
+    const conditionHash = this.getConditionHash(condType)
+    return DIVState.PIVOT_BASE + oscIndex * 10 + conditionHash
+  }
+
+  /**
+   * Get a consistent hash for condition types to avoid collisions
+   */
+  private getConditionHash(condType: string): number {
+    // Map specific condition types to unique indices
+    const conditionMap: Record<string, number> = {
+      oscHLrsi: 0,
+      priceLLrsi: 1,
+      bullCondrsi: 2,
+      inRangeoscHLrsi: 3,
+      oscLHrsi: 4,
+      priceHHrsi: 5,
+      bearCondrsi: 6,
+      inRangeoscLHrsi: 7,
+      oscLLrsi: 8,
+      priceHLrsi: 9,
+      // Add more mappings as needed - each oscillator gets its own space
+    }
+
+    // If we have a direct mapping, use it
+    if (conditionMap[condType] !== undefined) {
+      return conditionMap[condType]
+    }
+
+    // Otherwise, fall back to hash but with better distribution
+    return (
+      Math.abs(
+        [...condType].reduce((acc, char) => acc + char.charCodeAt(0), 0),
+      ) % 10
+    )
+  }
+
+  private plFound(type: DIVUsableOscillators): boolean {
+    const buffer = this.getOscBuffer(type)
+    if (!buffer.isFilled) {
+      return false
+    }
+
+    // Use the pivotLowCalculator to calculate pivot value on oscillator data
+    return !isNaN(this.pivotLowCalculator.calculate(buffer.normalizedArray))
+  }
+
+  private phFound(type: DIVUsableOscillators): boolean {
+    const buffer = this.getOscBuffer(type)
+    if (!buffer.isFilled) {
+      return false
+    }
+
+    // Use the pivotHighCalculator to calculate pivot value on oscillator data
+    return !isNaN(this.pivotHighCalculator.calculate(buffer.normalizedArray))
+  }
+
+  private barssince(
+    bool: boolean,
+    type: DIVUsableOscillators,
+    condType: string,
+  ): number | undefined {
+    const s = this._state
+    const index = this.barsSinceIndex(type, condType)
+
+    if (bool) {
+      // Condition is true, reset counter to 0
+      s[index] = 0
+    } else {
+      // Condition is false, increment counter (or initialize to 1 if never been true)
+      if (isNaN(s[index])) {
+        // Condition has never been true, return undefined like Pine Script
+        return undefined
+      }
+      s[index] += 1
+    }
+
+    return s[index]
+  }
+
+  private valuewhen(
+    bool: boolean,
+    val: number,
+    count: number,
+    type: DIVUsableOscillators,
+    condType: string,
+  ): number {
+    const s = this._state
+    const baseIndex = this.valueWhenIndex(type, condType)
+
+    if (bool) {
+      // Shift values (simple implementation)
+      for (let i = count; i > 0; i--) {
+        s[baseIndex + i] = s[baseIndex + i - 1]
+      }
+      s[baseIndex] = val
+    }
+
+    // Return NaN if the requested occurrence doesn't exist yet
+    return isNaN(s[baseIndex + count]) ? NaN : s[baseIndex + count]
+  }
+
+  private _inRange(
+    currentPivot: boolean,
+    type: DIVUsableOscillators,
+    condType: string,
+  ): boolean {
+    const bars = this.barssince(!currentPivot, type, `inRange${condType}`)
+    return bars !== undefined
+      ? this.rangeLower <= bars && bars <= this.rangeUpper
+      : false
+  }
+
+  // Higher Low on indicator
+  private oscHL(type: DIVUsableOscillators, condType: string): boolean {
+    const s = this._state
+    const pivotIdx = this.pivotIndex(type, `oscHL${condType}`)
+
+    const range = this.plFound(type)
+    s[pivotIdx] = range ? 1 : 0
+
+    // Get oscillator value from rightBars positions back (like old code)
+    const buffer = this.getOscBuffer(type)
+    const osc =
+      buffer.size >= this.rightBars + 1
+        ? buffer.array[buffer.size - this.rightBars - 1]
+        : NaN
+
+    // For Higher Low: current pivot value > previous pivot value
+    const currentPivotValue = this.valuewhen(
+      range,
+      osc,
+      0,
+      type,
+      `oscHL${condType}`,
+    )
+    const previousPivotValue = this.valuewhen(
+      range,
+      osc,
+      1,
+      type,
+      `oscHL${condType}`,
+    )
+
+    return (
+      !isNaN(currentPivotValue) &&
+      !isNaN(previousPivotValue) &&
+      currentPivotValue > previousPivotValue &&
+      this._inRange(range, type, `oscHL${condType}`)
+    )
+  }
+
+  // Lower Low on Price
+  private priceLL(type: DIVUsableOscillators, condType: string): boolean {
+    // Get current low from rightBars positions back (like old code)
+    const currentLow =
+      this.lowArray.size >= this.rightBars + 1
+        ? this.lowArray.array[this.lowArray.size - this.rightBars - 1]
+        : NaN
+    return (
+      currentLow <
+      this.valuewhen(
+        this.plFound(type),
+        currentLow,
+        1,
+        type,
+        `priceLL${condType}`,
+      )
+    )
+  }
+
+  // Regular Bullish
+  private bullCond(type: DIVUsableOscillators, condType: string): boolean {
+    return (
+      this.priceLL(type, condType) &&
+      this.oscHL(type, condType) &&
+      this.plFound(type)
+    )
+  }
+
+  // Lower High on indicator
+  private oscLH(type: DIVUsableOscillators, condType: string): boolean {
+    const s = this._state
+    const pivotIdx = this.pivotIndex(type, `oscLH${condType}`)
+
+    const range = this.phFound(type)
+    s[pivotIdx] = range ? 1 : 0
+
+    // Get oscillator value from rightBars positions back (like old code)
+    const buffer = this.getOscBuffer(type)
+    const osc =
+      buffer.size >= this.rightBars + 1
+        ? buffer.array[buffer.size - this.rightBars - 1]
+        : NaN
+
+    // For Lower High: current pivot value < previous pivot value
+    const currentPivotValue = this.valuewhen(
+      range,
+      osc,
+      0,
+      type,
+      `oscLH${condType}`,
+    )
+    const previousPivotValue = this.valuewhen(
+      range,
+      osc,
+      1,
+      type,
+      `oscLH${condType}`,
+    )
+
+    return (
+      !isNaN(currentPivotValue) &&
+      !isNaN(previousPivotValue) &&
+      currentPivotValue < previousPivotValue &&
+      this._inRange(range, type, `oscLH${condType}`)
+    )
+  }
+
+  // Higher High on Price
+  private priceHH(type: DIVUsableOscillators, condType: string): boolean {
+    // Get current high from rightBars positions back (like old code)
+    const currentHigh =
+      this.highArray.size >= this.rightBars + 1
+        ? this.highArray.array[this.highArray.size - this.rightBars - 1]
+        : NaN
+    return (
+      currentHigh >
+      this.valuewhen(
+        this.phFound(type),
+        currentHigh,
+        1,
+        type,
+        `priceHH${condType}`,
+      )
+    )
+  }
+
+  // Regular Bearish
+  private bearCond(type: DIVUsableOscillators, condType: string): boolean {
+    return (
+      this.priceHH(type, condType) &&
+      this.oscLH(type, condType) &&
+      this.phFound(type)
+    )
+  }
+
+  // Lower Low on indicator
+  private oscLL(type: DIVUsableOscillators, condType: string): boolean {
+    const s = this._state
+    const pivotIdx = this.pivotIndex(type, `oscLL${condType}`)
+
+    const range = this.plFound(type)
+    s[pivotIdx] = range ? 1 : 0
+
+    // Get oscillator value from rightBars positions back (like old code)
+    const buffer = this.getOscBuffer(type)
+    const osc =
+      buffer.size >= this.rightBars + 1
+        ? buffer.array[buffer.size - this.rightBars - 1]
+        : NaN
+
+    // For Lower Low: current pivot value < previous pivot value
+    const currentPivotValue = this.valuewhen(
+      range,
+      osc,
+      0,
+      type,
+      `oscLL${condType}`,
+    )
+    const previousPivotValue = this.valuewhen(
+      range,
+      osc,
+      1,
+      type,
+      `oscLL${condType}`,
+    )
+
+    return (
+      !isNaN(currentPivotValue) &&
+      !isNaN(previousPivotValue) &&
+      currentPivotValue < previousPivotValue &&
+      this._inRange(range, type, `oscLL${condType}`)
+    )
+  }
+
+  // Higher Low on Price
+  private priceHL(type: DIVUsableOscillators, condType: string): boolean {
+    // Get current low from rightBars positions back (like old code)
+    const currentLow =
+      this.lowArray.size >= this.rightBars + 1
+        ? this.lowArray.array[this.lowArray.size - this.rightBars - 1]
+        : NaN
+    return (
+      currentLow >
+      this.valuewhen(
+        this.plFound(type),
+        currentLow,
+        1,
+        type,
+        `priceHL${condType}`,
+      )
+    )
+  }
+
+  // Hidden Bullish
+  private hiddenBullCond(
+    type: DIVUsableOscillators,
+    condType: string,
+  ): boolean {
+    return (
+      this.priceHL(type, condType) &&
+      this.oscLL(type, condType) &&
+      this.plFound(type)
+    )
+  }
+
+  // Higher High on indicator
+  private oscHH(type: DIVUsableOscillators, condType: string): boolean {
+    const s = this._state
+    const pivotIdx = this.pivotIndex(type, `oscHH${condType}`)
+
+    const range = this.phFound(type)
+    s[pivotIdx] = range ? 1 : 0
+
+    // Get oscillator value from rightBars positions back (like old code)
+    const buffer = this.getOscBuffer(type)
+    const osc =
+      buffer.size >= this.rightBars + 1
+        ? buffer.array[buffer.size - this.rightBars - 1]
+        : NaN
+
+    // For Higher High: current pivot value > previous pivot value
+    const currentPivotValue = this.valuewhen(
+      range,
+      osc,
+      0,
+      type,
+      `oscHH${condType}`,
+    )
+    const previousPivotValue = this.valuewhen(
+      range,
+      osc,
+      1,
+      type,
+      `oscHH${condType}`,
+    )
+
+    return (
+      !isNaN(currentPivotValue) &&
+      !isNaN(previousPivotValue) &&
+      currentPivotValue > previousPivotValue &&
+      this._inRange(range, type, `oscHH${condType}`)
+    )
+  }
+
+  // Lower High on Price
+  private priceLH(type: DIVUsableOscillators, condType: string): boolean {
+    // Get current high from rightBars positions back (like old code)
+    const currentHigh =
+      this.highArray.size >= this.rightBars + 1
+        ? this.highArray.array[this.highArray.size - this.rightBars - 1]
+        : NaN
+    return (
+      currentHigh <
+      this.valuewhen(
+        this.phFound(type),
+        currentHigh,
+        1,
+        type,
+        `priceLH${condType}`,
+      )
+    )
+  }
+
+  // Hidden Bearish
+  private hiddenBearCond(
+    type: DIVUsableOscillators,
+    condType: string,
+  ): boolean {
+    return (
+      this.priceLH(type, condType) &&
+      this.oscHH(type, condType) &&
+      this.phFound(type)
+    )
+  }
+
+  private updateOscillator(
+    type: DIVUsableOscillators,
+    value: number | undefined,
+  ): void {
+    if (typeof value !== 'undefined') {
+      const buffer = this.getOscBuffer(type)
+      buffer.add(value)
+    }
+  }
+
+  private useOsc(type: DIVUsableOscillators): boolean {
+    return this.oscillators.includes(type)
+  }
+
+  calculate(): DIVResult | null {
+    const s = this._state
+    const h = this._history
+    const l = h.last
+    this.highArray.add(l.high)
+    this.lowArray.add(l.low)
+
+    const c = l.close
+    const rsi = this.useOsc('rsi') ? this.rsi.next(c) : undefined
+    const mfi = this.useOsc('mfi') ? this.mfi.next(l) : undefined
+    const macd = this.useOsc('macd') ? this.macd.next(c) : undefined
+    const cci = this.useOsc('cci') ? this.cci.next(l) : undefined
+    const ao = this.useOsc('ao') ? this.ao.next(l) : undefined
+    const wr = this.useOsc('wr') ? this.wr.next(l) : undefined
+    const uo = this.useOsc('uo') ? this.uo.next(l) : undefined
+    const mom = this.useOsc('mom') ? this.mom.next(l) : undefined
+    const stoch = this.useOsc('stoch') ? this.stoch.next(l) : undefined
+
+    // Update oscillator buffers with new values
+    if (rsi && typeof rsi.value !== 'undefined') {
+      this.updateOscillator('rsi', rsi.value)
+    }
+    if (mfi && typeof mfi.value !== 'undefined') {
+      this.updateOscillator('mfi', mfi.value)
+    }
+    if (stoch && typeof stoch.stochD !== 'undefined') {
+      this.updateOscillator('stoch', stoch.stochD)
+    }
+    if (macd && typeof macd.histogram !== 'undefined') {
+      this.updateOscillator('macd', macd.histogram)
+    }
+    if (cci && typeof cci.value !== 'undefined') {
+      this.updateOscillator('cci', cci.value)
+    }
+    if (ao && typeof ao.value !== 'undefined') {
+      this.updateOscillator('ao', ao.value)
+    }
+    if (wr && typeof wr.value !== 'undefined') {
+      this.updateOscillator('wr', wr.value)
+    }
+    if (uo && typeof uo.value !== 'undefined') {
+      this.updateOscillator('uo', uo.value)
+    }
+    if (mom && typeof mom.value !== 'undefined') {
+      this.updateOscillator('mom', mom.value)
+    }
+
+    // Calculate regular bearish divergence
+    s[DIVState.RESULT_NEG_DIVERGENCE] = 0
+    if (this.useOsc('rsi') && this.bearCond('rsi', 'rsi')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('mfi') && this.bearCond('mfi', 'mfi')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('stoch') && this.bearCond('stoch', 'stoch')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('macd') && this.bearCond('macd', 'macd')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('cci') && this.bearCond('cci', 'cci')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('ao') && this.bearCond('ao', 'ao')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('wr') && this.bearCond('wr', 'wr')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('uo') && this.bearCond('uo', 'uo')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+    if (this.useOsc('mom') && this.bearCond('mom', 'mom')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE] += 1
+    }
+
+    // Calculate regular bullish divergence
+    s[DIVState.RESULT_POS_DIVERGENCE] = 0
+    if (this.useOsc('rsi') && this.bullCond('rsi', 'rsi')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('mfi') && this.bullCond('mfi', 'mfi')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('stoch') && this.bullCond('stoch', 'stoch')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('macd') && this.bullCond('macd', 'macd')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('cci') && this.bullCond('cci', 'cci')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('ao') && this.bullCond('ao', 'ao')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('wr') && this.bullCond('wr', 'wr')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('uo') && this.bullCond('uo', 'uo')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+    if (this.useOsc('mom') && this.bullCond('mom', 'mom')) {
+      s[DIVState.RESULT_POS_DIVERGENCE] += 1
+    }
+
+    // Calculate hidden bearish divergence
+    s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] = 0
+    if (this.useOsc('rsi') && this.hiddenBearCond('rsi', 'rsi')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('stoch') && this.hiddenBearCond('stoch', 'stoch')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('mfi') && this.hiddenBearCond('mfi', 'mfi')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('macd') && this.hiddenBearCond('macd', 'macd')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('cci') && this.hiddenBearCond('cci', 'cci')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('ao') && this.hiddenBearCond('ao', 'ao')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('wr') && this.hiddenBearCond('wr', 'wr')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('uo') && this.hiddenBearCond('uo', 'uo')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('mom') && this.hiddenBearCond('mom', 'mom')) {
+      s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN] += 1
+    }
+
+    // Calculate hidden bullish divergence
+    s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] = 0
+    if (this.useOsc('rsi') && this.hiddenBullCond('rsi', 'rsi')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('mfi') && this.hiddenBullCond('mfi', 'mfi')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('stoch') && this.hiddenBullCond('stoch', 'stoch')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('macd') && this.hiddenBullCond('macd', 'macd')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('cci') && this.hiddenBullCond('cci', 'cci')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('ao') && this.hiddenBullCond('ao', 'ao')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('wr') && this.hiddenBullCond('wr', 'wr')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('uo') && this.hiddenBullCond('uo', 'uo')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+    if (this.useOsc('mom') && this.hiddenBullCond('mom', 'mom')) {
+      s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN] += 1
+    }
+
+    return {
+      posdivergencehidden: s[DIVState.RESULT_POS_DIVERGENCE_HIDDEN],
+      negdivergencehidden: s[DIVState.RESULT_NEG_DIVERGENCE_HIDDEN],
+      posdivergence: s[DIVState.RESULT_POS_DIVERGENCE],
+      negdivergence: s[DIVState.RESULT_NEG_DIVERGENCE],
+    }
+  }
+
+  /**
+   * Export indicator state for persistence
+   * @returns Object containing all state needed to restore the indicator
+   */
+  public exportState(): LightIndicatorState {
+    return {
+      parent: super.exportState(),
+      circ: [
+        this.highArray.exportState(),
+        this.lowArray.exportState(),
+        this.oscMfi.exportState(),
+        this.oscMacd.exportState(),
+        this.oscStoch.exportState(),
+        this.oscRsi.exportState(),
+        this.oscCci.exportState(),
+        this.oscAo.exportState(),
+        this.oscWr.exportState(),
+        this.oscUo.exportState(),
+        this.oscMom.exportState(),
+      ],
+      bin: [],
+      child: [
+        this.mfi.exportState(),
+        this.macd.exportState(),
+        this.stoch.exportState(),
+        this.rsi.exportState(),
+        this.cci.exportState(),
+        this.ao.exportState(),
+        this.wr.exportState(),
+        this.uo.exportState(),
+        this.mom.exportState(),
+      ],
+    }
+  }
+
+  /**
+   * Restore indicator state from previously exported data
+   * @param state Previously exported state
+   */
+  public restoreState(state: LightIndicatorState) {
+    if (!state.parent) {
+      throw new Error('Invalid state: parent state is missing')
+    }
+    if (!state.circ) {
+      throw new Error('Invalid state: circular buffer states are missing')
+    }
+    if (!state.bin) {
+      throw new Error('Invalid state: bin states are missing')
+    }
+    if (!state.child || state.child.length < 9) {
+      throw new Error('Invalid state: child states are missing or incomplete')
+    }
+    // Restore circular buffers
+    this.highArray.restoreState(state.circ[0])
+    this.lowArray.restoreState(state.circ[1])
+    this.oscMfi.restoreState(state.circ[2])
+    this.oscMacd.restoreState(state.circ[3])
+    this.oscStoch.restoreState(state.circ[4])
+    this.oscRsi.restoreState(state.circ[5])
+    this.oscCci.restoreState(state.circ[6])
+    this.oscAo.restoreState(state.circ[7])
+    this.oscWr.restoreState(state.circ[8])
+    this.oscUo.restoreState(state.circ[9])
+    this.oscMom.restoreState(state.circ[10])
+    // Restore child indicators
+    this.mfi.restoreState(state.child[0])
+    this.macd.restoreState(state.child[1])
+    this.stoch.restoreState(state.child[2])
+    this.rsi.restoreState(state.child[3])
+    this.cci.restoreState(state.child[4])
+    this.ao.restoreState(state.child[5])
+    this.wr.restoreState(state.child[6])
+    this.uo.restoreState(state.child[7])
+    this.mom.restoreState(state.child[8])
+    // Restore parent state
+    super.restoreState(state.parent)
+  }
+}
