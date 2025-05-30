@@ -1,51 +1,56 @@
 #!/bin/bash
 
-# Build script that checks if build is needed
-# This script checks if dist exists and if source files are newer than dist
+# Smart build script for @gainium/indicators
+# Only builds if source files are newer than dist or if dist doesn't exist
 
-DIST_DIR="dist"
-SRC_DIR="src"
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DIST_DIR="$PROJECT_DIR/dist"
+SRC_DIR="$PROJECT_DIR/src"
 BUILD_MARKER="$DIST_DIR/.build-marker"
 
-# Function to check if build is needed
-need_build() {
-    # If dist doesn't exist, we need to build
-    if [ ! -d "$DIST_DIR" ]; then
-        echo "dist directory doesn't exist, building..."
-        return 0
-    fi
-    
-    # If build marker doesn't exist, we need to build
-    if [ ! -f "$BUILD_MARKER" ]; then
-        echo "build marker doesn't exist, building..."
-        return 0
-    fi
-    
-    # Check if any source file is newer than the build marker
-    if find "$SRC_DIR" -name "*.ts" -newer "$BUILD_MARKER" | grep -q .; then
-        echo "source files are newer than last build, rebuilding..."
-        return 0
-    fi
-    
-    # Check if tsconfig.json is newer than the build marker
-    if [ "tsconfig.json" -nt "$BUILD_MARKER" ]; then
-        echo "tsconfig.json is newer than last build, rebuilding..."
-        return 0
-    fi
-    
-    echo "build is up to date, skipping..."
-    return 1
-}
-
-# Main build logic
-if need_build; then
-    echo "Building @gainium/indicators..."
-    rm -rf "$DIST_DIR"
+# Check if dist directory exists
+if [ ! -d "$DIST_DIR" ]; then
+    echo "📦 Building @gainium/indicators: dist directory doesn't exist"
     npm run build
-    # Create build marker
-    mkdir -p "$DIST_DIR"
     touch "$BUILD_MARKER"
-    echo "Build completed!"
-else
-    echo "Build skipped - no changes detected"
+    exit 0
 fi
+
+# Check if build marker exists
+if [ ! -f "$BUILD_MARKER" ]; then
+    echo "📦 Building @gainium/indicators: build marker missing"
+    npm run build
+    touch "$BUILD_MARKER"
+    exit 0
+fi
+
+# Find the newest source file
+if [ -d "$SRC_DIR" ]; then
+    NEWEST_SRC=$(find "$SRC_DIR" -name "*.ts" -type f -exec stat -f %m {} \; | sort -n | tail -1)
+    BUILD_TIME=$(stat -f %m "$BUILD_MARKER" 2>/dev/null || echo 0)
+    
+    if [ "$NEWEST_SRC" -gt "$BUILD_TIME" ]; then
+        echo "📦 Building @gainium/indicators: source files newer than build"
+        npm run build
+        touch "$BUILD_MARKER"
+        exit 0
+    fi
+fi
+
+# Check if tsconfig.json is newer
+if [ -f "$PROJECT_DIR/tsconfig.json" ]; then
+    TSCONFIG_TIME=$(stat -f %m "$PROJECT_DIR/tsconfig.json")
+    BUILD_TIME=$(stat -f %m "$BUILD_MARKER" 2>/dev/null || echo 0)
+    
+    if [ "$TSCONFIG_TIME" -gt "$BUILD_TIME" ]; then
+        echo "📦 Building @gainium/indicators: tsconfig.json updated"
+        npm run build
+        touch "$BUILD_MARKER"
+        exit 0
+    fi
+fi
+
+echo "✅ @gainium/indicators: dist is up to date"
