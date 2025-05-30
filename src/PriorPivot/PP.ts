@@ -130,26 +130,22 @@ export class PriorPivot extends LightIndicator<PriorPivotResult, HLC> {
   }
 
   private pivotHigh() {
-    let offset = 0
-    while (offset < this.maxLen) {
-      const index = this.pivotHighHistory.length - offset - 1
-      if (!isNaN(this.pivotHighHistory[index])) {
-        break
+    // Find the last non-NaN value in the array, starting from the end
+    for (let i = this.pivotHighHistory.length - 1; i >= 0; i--) {
+      if (!isNaN(this.pivotHighHistory[i])) {
+        return this.pivotHighHistory[i]
       }
-      offset++
     }
-    return this.pivotHighHistory[this.pivotHighHistory.length - offset - 1]
+    return NaN
   }
   private pivotLow() {
-    let offset = 0
-    while (offset < this.maxLen) {
-      const index = this.pivotLowHistory.length - offset - 1
-      if (!isNaN(this.pivotLowHistory[index])) {
-        break
+    // Find the last non-NaN value in the array, starting from the end
+    for (let i = this.pivotLowHistory.length - 1; i >= 0; i--) {
+      if (!isNaN(this.pivotLowHistory[i])) {
+        return this.pivotLowHistory[i]
       }
-      offset++
     }
-    return this.pivotLowHistory[this.pivotLowHistory.length - offset - 1]
+    return NaN
   }
 
   private valuewhen(bool: boolean, val: number, count: number, type: string) {
@@ -250,26 +246,26 @@ export class PriorPivot extends LightIndicator<PriorPivotResult, HLC> {
     const hh = isNaN(pivotHigh)
       ? NaN
       : hhValueWhen1 < hhValueWhen2
-        ? pivotHigh
-        : NaN
+      ? pivotHigh
+      : NaN
 
     const hl = isNaN(pivotLow)
       ? NaN
       : hlValueWhen1 < hlValueWhen2
-        ? pivotLow
-        : NaN
+      ? pivotLow
+      : NaN
 
     const lh = isNaN(pivotHigh)
       ? NaN
       : lhValueWhen1 > lhValueWhen2
-        ? pivotHigh
-        : NaN
+      ? pivotHigh
+      : NaN
 
     const ll = isNaN(pivotLow)
       ? NaN
       : llValueWhen1 > llValueWhen2
-        ? pivotLow
-        : NaN
+      ? pivotLow
+      : NaN
     if (!isNaN(hh)) {
       this.currentH = 'hh'
     }
