@@ -34,6 +34,7 @@
   "files": [
     "dist/**/*",
     "src/**/*",
+    "scripts/**/*",
     "tsconfig.json",
     "README.md",
     "LICENSE"
@@ -59,7 +60,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "npm run clean && npm run build",
+    "postinstall": "./scripts/build-if-needed.sh",
+    "build:if-needed": "./scripts/build-if-needed.sh",
+    "rebuild": "npm run clean && npm run build",
     "prepublishOnly": "npm run clean && npm run build",
     "pull": "git pull origin main",
     "push": "git push origin main"
