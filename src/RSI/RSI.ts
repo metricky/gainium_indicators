@@ -112,8 +112,8 @@ export class RSI extends LightIndicator<PercentileResult> {
   constructor(
     public readonly interval: number,
     private percentile?: boolean,
-    private percentileLookback?: number,
-    private percentilePercentage?: number,
+    percentileLookback?: number,
+    percentilePercentage?: number,
   ) {
     /**
      * Initialize RSI indicator with LightIndicator base class
@@ -132,8 +132,11 @@ export class RSI extends LightIndicator<PercentileResult> {
     this.avgLoss = new WSMA(this.interval)
 
     // Initialize percentile calculator if requested
-    if (this.percentile && this.percentileLookback) {
-      this.percentileCalc = new PercentileCalculator(this.percentileLookback)
+    if (this.percentile && percentileLookback) {
+      this.percentileCalc = new PercentileCalculator(
+        percentileLookback,
+        percentilePercentage,
+      )
     }
   }
 
@@ -193,7 +196,7 @@ export class RSI extends LightIndicator<PercentileResult> {
         this.maxValue - this.maxValue / (avgGain.result / avgLoss.result + 1)
 
       // Handle percentile calculation if needed
-      if (this.percentile && this.percentileCalc && this.percentilePercentage) {
+      if (this.percentile && this.percentileCalc) {
         // Insert the RSI value into the percentile calculator
 
         if (this.percentileCalc.insert(s[RSIState.RSI_VALUE])) {
