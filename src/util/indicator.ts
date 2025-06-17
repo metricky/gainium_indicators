@@ -1,4 +1,3 @@
-import { performance } from 'perf_hooks'
 import { CircularArray, CircularArrayState } from './array'
 
 /**
@@ -31,10 +30,6 @@ export abstract class LightIndicator<T = number, I = number>
   protected _state: Float64Array
   protected _result: T | null = null
 
-  //Tick count for performance tracking
-  protected _tickCount: number = 0
-  protected _tickTotalTime: number = 0
-
   /**
    * @param historySize Size of the circular buffer for history values
    * @param initialValue Initial value to fill the history with
@@ -55,14 +50,9 @@ export abstract class LightIndicator<T = number, I = number>
    * Uses zero-allocation approach by reusing objects and Float64Array
    */
   next(value: I): T | null {
-    // Increment tick count for performance tracking
-    this._tickCount++
-    this._tickTotalTime -= performance.now()
     // Update history in a circular buffer pattern
     this._history.add(value)
     this._result = this.calculate()
-    // Update tick total time
-    this._tickTotalTime += performance.now()
     return this._result
   }
 
@@ -96,17 +86,6 @@ export abstract class LightIndicator<T = number, I = number>
    */
   get result(): T | null {
     return this._result
-  }
-
-  /**
-   * Return state for performance tracking
-   */
-  get performanceState() {
-    return {
-      tickCount: this._tickCount,
-      tickTotalTime: this._tickTotalTime,
-      average: this._tickCount > 0 ? this._tickTotalTime / this._tickCount : 0,
-    }
   }
 
   /**
