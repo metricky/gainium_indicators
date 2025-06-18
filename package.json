@@ -1,6 +1,6 @@
 {
   "name": "@gainium/indicators",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "High-performance TypeScript technical indicators library for professional trading applications with 45+ indicators optimized for real-time systems",
   "keywords": [
     "technical-analysis",
@@ -67,9 +67,7 @@
     "pull": "git pull origin main",
     "push": "git push origin main"
   },
-  "dependencies": {
-    "typescript": "^5.8.3"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.15.24",
     "@typescript-eslint/eslint-plugin": "^8.33.0",
@@ -78,6 +76,7 @@
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-prettier": "^5.4.0",
     "prettier": "^3.5.3",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
   }
 }
