@@ -54,3 +54,4 @@ if [ -f "$PROJECT_DIR/tsconfig.json" ]; then
 fi
 
 echo "✅ @gainium/indicators: dist is up to date"
+exit 0
