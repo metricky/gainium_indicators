@@ -5,6 +5,12 @@ All notable changes to the Gainium Technical Indicators library will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2025-06-30
+
+### Changed
+- Migrated package manager from Yarn to npm
+- Removed yarn.lock in favor of package-lock.json
+
 ## [1.0.2] - 2025-06-02
 
 ### Fixed

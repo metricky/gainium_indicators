@@ -1,6 +1,6 @@
 {
   "name": "@gainium/indicators",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "High-performance TypeScript technical indicators library for professional trading applications with 45+ indicators optimized for real-time systems",
   "keywords": [
     "technical-analysis",
@@ -60,14 +60,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "./scripts/build-if-needed.sh",
-    "build:if-needed": "./scripts/build-if-needed.sh",
+    "postinstall": "npm run build",
+    "build:if-needed": "npm run build",
     "rebuild": "npm run clean && npm run build",
     "prepublishOnly": "npm run clean && npm run build",
     "pull": "git pull origin main",
-    "push": "git push origin main"
+    "push": "git push origin main",
+    "prepare": "husky"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.15.24",
     "@typescript-eslint/eslint-plugin": "^8.33.0",
@@ -75,6 +75,7 @@
     "eslint": "^9.27.0",
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-prettier": "^5.4.0",
+    "husky": "^9.1.7",
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
