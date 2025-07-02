@@ -246,26 +246,26 @@ export class PriorPivot extends LightIndicator<PriorPivotResult, HLC> {
     const hh = isNaN(pivotHigh)
       ? NaN
       : hhValueWhen1 < hhValueWhen2
-      ? pivotHigh
-      : NaN
+        ? pivotHigh
+        : NaN
 
     const hl = isNaN(pivotLow)
       ? NaN
       : hlValueWhen1 < hlValueWhen2
-      ? pivotLow
-      : NaN
+        ? pivotLow
+        : NaN
 
     const lh = isNaN(pivotHigh)
       ? NaN
       : lhValueWhen1 > lhValueWhen2
-      ? pivotHigh
-      : NaN
+        ? pivotHigh
+        : NaN
 
     const ll = isNaN(pivotLow)
       ? NaN
       : llValueWhen1 > llValueWhen2
-      ? pivotLow
-      : NaN
+        ? pivotLow
+        : NaN
     if (!isNaN(hh)) {
       this.currentH = 'hh'
     }
