@@ -64,18 +64,19 @@ export class DonchianChannels extends LightIndicator<DCResult, HLC> {
   protected calculate(): DCResult | null {
     const l = this._history.last
     const e = this.extremum
-
-    if (e.next(l) === null) {
-      return null
+    let r: DCResult | null = null
+    if (e.result) {
+      r = {
+        high: e.result!.highest,
+        low: e.result!.lowest,
+        basis: (e.result!.highest + e.result!.lowest) / 2,
+        price: l.close,
+      }
     }
+    e.next(l)
 
     // Return the result
-    return {
-      high: e.result!.highest,
-      low: e.result!.lowest,
-      basis: (e.result!.highest + e.result!.lowest) / 2,
-      price: l.close,
-    }
+    return r
   }
 
   exportState(): LightIndicatorState {
