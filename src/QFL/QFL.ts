@@ -191,9 +191,9 @@ export class QFL extends LightIndicator<QFLResult, HL> {
     s[QFLState.PREV_BASE] = s[QFLState.BASE]
 
     s[QFLState.HIGHEST_HIGH] =
-      s[QFLState.NEW_BASE] || (hh.isFilled && gt(l.high, hh.older2))
+      s[QFLState.NEW_BASE] || (hh.isFilled && gt(l.high, hh.current))
         ? s[QFLState.OFFSET_HIGH]
-        : hh.older
+        : hh.last
 
     // Store current high in history
     hh.add(s[QFLState.HIGHEST_HIGH])
