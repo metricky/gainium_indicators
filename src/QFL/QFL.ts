@@ -165,6 +165,11 @@ export class QFL extends LightIndicator<QFLResult, HL> {
       return null
     }
 
+    // Determine if there's a new base
+    s[QFLState.NEW_BASE] = Number(
+      gt(lh.older, lh.older2) && eq(lh.older2, s[QFLState.LOWEST_LOW]),
+    )
+
     // Add to lowHistory
     lh.add(s[QFLState.LOWEST_LOW])
 
@@ -172,11 +177,6 @@ export class QFL extends LightIndicator<QFLResult, HL> {
     if (!lh.isFilled) {
       return null
     }
-
-    // Determine if there's a new base
-    s[QFLState.NEW_BASE] = Number(
-      gt(lh.older, lh.older2) && eq(lh.older2, lh.last),
-    )
 
     // Set base value
     s[QFLState.BASE] = NaN
@@ -191,7 +191,7 @@ export class QFL extends LightIndicator<QFLResult, HL> {
     s[QFLState.PREV_BASE] = s[QFLState.BASE]
 
     s[QFLState.HIGHEST_HIGH] =
-      s[QFLState.NEW_BASE] || (hh.isFilled && gt(l.high, hh.current))
+      s[QFLState.NEW_BASE] || (hh.isFilled && gt(l.high, hh.last))
         ? s[QFLState.OFFSET_HIGH]
         : hh.last
 
