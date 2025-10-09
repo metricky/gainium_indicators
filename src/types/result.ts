@@ -98,3 +98,13 @@ export type PriorPivotResult = LinesResult & {
   iBearCHoCH: boolean
   market: 'bull' | 'bear' | null
 }
+
+export type OBFVGResult = {
+  bullishFVGHigh: number
+  bullishFVGLow: number
+  bullishFVGMiddle: number
+  bearishFVGHigh: number
+  bearishFVGLow: number
+  bearishFVGMiddle: number
+  price: number
+}
