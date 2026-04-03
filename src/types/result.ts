@@ -99,6 +99,11 @@ export type PriorPivotResult = LinesResult & {
   market: 'bull' | 'bear' | null
 }
 
+export type LongWickResult = {
+  bull: number
+  bear: number
+}
+
 export type OBFVGResult = {
   bullishFVGHigh: number
   bullishFVGLow: number
