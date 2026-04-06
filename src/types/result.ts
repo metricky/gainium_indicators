@@ -102,6 +102,7 @@ export type PriorPivotResult = LinesResult & {
 export type LongWickResult = {
   bull: number
   bear: number
+  price: number
 }
 
 export type OBFVGResult = {

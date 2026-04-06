@@ -10,6 +10,8 @@ enum LWState {
   BEAR_LEVEL = 1,
   BULL_COUNT = 2,
   BEAR_COUNT = 3,
+  NEW_BULL = 4,
+  NEW_BEAR = 5,
 }
 
 export class LongWick extends LightIndicator<LongWickResult, OHLC> {
@@ -27,6 +29,8 @@ export class LongWick extends LightIndicator<LongWickResult, OHLC> {
     this._state[LWState.BEAR_LEVEL] = NaN
     this._state[LWState.BULL_COUNT] = NaN
     this._state[LWState.BEAR_COUNT] = NaN
+    this._state[LWState.NEW_BULL] = 0
+    this._state[LWState.NEW_BEAR] = 0
   }
 
   protected calculate(): LongWickResult | null {
@@ -47,52 +51,51 @@ export class LongWick extends LightIndicator<LongWickResult, OHLC> {
     const bodyBottom = Math.min(candle.open, candle.close)
     const topWick = candle.high - bodyTop
     const bottomWick = bodyBottom - candle.low
+    s[LWState.NEW_BULL] = 0
+    s[LWState.NEW_BEAR] = 0
+
+    // Detect new long top wick → bullish level (price wants to reach up)
+    if (topWick >= volatility) {
+      s[LWState.BULL_LEVEL] = candle.high
+      s[LWState.BULL_COUNT] = 0
+      s[LWState.NEW_BULL] = 1
+    }
+
+    // Detect new long bottom wick → bearish level (price wants to reach down)
+    if (bottomWick >= volatility) {
+      s[LWState.BEAR_LEVEL] = candle.low
+      s[LWState.BEAR_COUNT] = 0
+      s[LWState.NEW_BEAR] = 1
+    }
 
     // Check mitigation and expiry for existing bull level
-    if (!isNaN(s[LWState.BULL_LEVEL])) {
+    if (!isNaN(s[LWState.BULL_LEVEL]) && !s[LWState.NEW_BULL]) {
       s[LWState.BULL_COUNT]++
-      // Mitigated: close reaches up to the bull level
-      if (candle.close >= s[LWState.BULL_LEVEL]) {
-        s[LWState.BULL_LEVEL] = NaN
-        s[LWState.BULL_COUNT] = NaN
-      }
-      // Expired
-      else if (s[LWState.BULL_COUNT] > this.maxDuration) {
+      if (
+        bodyTop >= s[LWState.BULL_LEVEL] ||
+        s[LWState.BULL_COUNT] > this.maxDuration
+      ) {
         s[LWState.BULL_LEVEL] = NaN
         s[LWState.BULL_COUNT] = NaN
       }
     }
 
     // Check mitigation and expiry for existing bear level
-    if (!isNaN(s[LWState.BEAR_LEVEL])) {
+    if (!isNaN(s[LWState.BEAR_LEVEL]) && !s[LWState.NEW_BEAR]) {
       s[LWState.BEAR_COUNT]++
-      // Mitigated: close reaches down to the bear level
-      if (candle.close <= s[LWState.BEAR_LEVEL]) {
+      if (
+        bodyBottom <= s[LWState.BEAR_LEVEL] ||
+        s[LWState.BEAR_COUNT] > this.maxDuration
+      ) {
         s[LWState.BEAR_LEVEL] = NaN
         s[LWState.BEAR_COUNT] = NaN
       }
-      // Expired
-      else if (s[LWState.BEAR_COUNT] > this.maxDuration) {
-        s[LWState.BEAR_LEVEL] = NaN
-        s[LWState.BEAR_COUNT] = NaN
-      }
-    }
-
-    // Detect new long top wick → bullish level (price wants to reach up)
-    if (topWick >= volatility) {
-      s[LWState.BULL_LEVEL] = bodyTop + topWick
-      s[LWState.BULL_COUNT] = 0
-    }
-
-    // Detect new long bottom wick → bearish level (price wants to reach down)
-    if (bottomWick >= volatility) {
-      s[LWState.BEAR_LEVEL] = bodyBottom - bottomWick
-      s[LWState.BEAR_COUNT] = 0
     }
 
     return {
       bull: s[LWState.BULL_LEVEL],
       bear: s[LWState.BEAR_LEVEL],
+      price: candle.close,
     }
   }
 
