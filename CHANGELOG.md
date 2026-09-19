@@ -5,6 +5,50 @@ All notable changes to the Gainium Technical Indicators library will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-19
+
+### Fixed
+
+- `EMA` and `RMA` seeded their first value from one input too few. Both
+  are seeded with the simple average of their first `interval` inputs,
+  but the running total that average was built from was only updated
+  while the history buffer was *not yet* full — and the input that fills
+  the buffer is the `interval`-th one. So the total held `interval - 1`
+  inputs and was still divided by `interval`, starting the average low
+  by a factor of `(interval - 1) / interval` for a positive series. The
+  seed is now the average of the filled buffer, which includes that last
+  input. `EMA(3)` of a constant series of 10s is now `10` from its first
+  value; it used to start at `6.67`.
+- `EMA(1)` and `RMA(1)` returned `NaN` for every input, because the
+  buffer fills on the very first one and the running total was never
+  initialised. They now return the input, which is what `alpha = 1`
+  means.
+- A missing value (`NaN`) inside the first window no longer poisons the
+  average permanently. The first value now simply arrives once
+  `interval` clean inputs are in a row. A `NaN` after the first value is
+  still `NaN` for that bar, and the average then restarts the same way
+  instead of silently continuing from its stale previous value.
+
+### Changed
+
+- **Indicator values in the first bars after a start change, and so do
+  backtest results over short windows.** Those were the wrong ones. The
+  error was largest at the first value (`1 / interval` in relative
+  terms — about 11 % at `interval = 9`, 0.5 % at 200) and decayed over
+  roughly the average's own time constant, so how much of it an
+  indicator ever showed depended on how much history was loaded in front
+  of it. Anything with a long warm-up had decayed to nothing before its
+  first output; a start on a short history had not.
+- Affected, because they are built on `EMA` or `RMA`: `ATR` and the
+  ATR-based settings, `MACD`, `DEMA`, `TEMA`, `SuperTrend`, Bollinger
+  and Keltner channels on an EMA basis, `MAR` on an EMA/RMA basis, the
+  volume oscillator, the divergence indicator and the TradingView-style
+  technical-analysis rating.
+- **Not** affected, confirmed value-for-value against the previous
+  release: `SMA`, `WMA`, `HMA`, `CCI`, and — despite being Wilder
+  indicators — `RSI` and `ADX`, which smooth with `WSMA`. `WSMA` seeds
+  itself from a real `SMA` instance and was always correct.
+
 ## [1.3.2] - 2026-09-03
 
 ### Added

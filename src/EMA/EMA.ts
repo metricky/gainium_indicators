@@ -1,11 +1,12 @@
-import { lastIndexOfEnum } from '../util'
+import { average, lastIndexOfEnum } from '../util'
 import { LightIndicator } from '../util/indicator'
 
 // Define state indices for clarity
 enum EMAState {
   CURRENT_EMA = 0,
   PREVIOUS_EMA = 1,
-  SUM_FOR_INITIAL_EMA = 2,
+  // No longer read. Kept so the exported state keeps its layout.
+  UNUSED = 2,
 }
 
 /**
@@ -54,7 +55,7 @@ export class EMA extends LightIndicator {
    *
    * @param interval - Period over which to calculate EMA (typically 9, 12, 21, 26, or 50 periods depending on trading strategy)
    */
-  constructor(private readonly interval: number) {
+  constructor(interval: number) {
     /**
      * Initialize the LightIndicator parent class
      * @param historyLength - interval (need full period for initial SMA calculation)
@@ -74,18 +75,24 @@ export class EMA extends LightIndicator {
   protected calculate(): number | null {
     const s = this._state
     const h = this._history
-    // Initialization phase: collect data for initial SMA calculation
+    // Initialization phase: not enough inputs for a first value yet
     if (!h.isFilled) {
-      if (isNaN(s[EMAState.SUM_FOR_INITIAL_EMA])) {
-        s[EMAState.SUM_FOR_INITIAL_EMA] = 0
-      }
-      // Accumulate sum for initial EMA (which is actually SMA)
-      s[EMAState.SUM_FOR_INITIAL_EMA] += h.last
       return null
     }
     if (isNaN(s[EMAState.CURRENT_EMA])) {
-      // When we have enough data, calculate the initial EMA (which is SMA)
-      s[EMAState.CURRENT_EMA] = s[EMAState.SUM_FOR_INITIAL_EMA] / this.interval
+      // The initial EMA is the SMA of the first `interval` inputs, which is
+      // exactly what the history holds once it is filled. Averaging the buffer
+      // here is what includes the input that filled it: a running total kept
+      // inside the branch above is only updated while the buffer is NOT yet
+      // full, so it always missed that last input and averaged interval - 1
+      // values over interval.
+      const seed = average(h.array)
+      if (isNaN(seed)) {
+        // A gap inside the window: wait for `interval` clean inputs in a row
+        // rather than seeding from a partial window, or from NaN for good.
+        return null
+      }
+      s[EMAState.CURRENT_EMA] = seed
       return s[EMAState.CURRENT_EMA]
     }
     // Regular EMA calculation after initialization
