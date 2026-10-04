@@ -1,11 +1,12 @@
-import { lastIndexOfEnum } from '../util'
+import { average, lastIndexOfEnum } from '../util'
 import { LightIndicator } from '../util/indicator'
 
 // Define state indices for clarity
 enum RMAState {
   PREVIOUS_RMA = 0,
   CURRENT_RMA = 1,
-  SUM_FOR_FIRST_RMA = 2,
+  // No longer read. Kept so the exported state keeps its layout.
+  UNUSED = 2,
 }
 
 /**
@@ -81,7 +82,7 @@ export class RMA extends LightIndicator {
    *                 50 (long-term trend). Longer periods provide smoother signals but reduce
    *                 responsiveness to trend changes.
    */
-  constructor(private readonly interval: number) {
+  constructor(interval: number) {
     /**
      * Initializes the parent LightIndicator with:
      * @param historyLength interval - Needs full period of historical data for initial SMA calculation
@@ -101,19 +102,25 @@ export class RMA extends LightIndicator {
   protected calculate(): number | null {
     const s = this._state
     const h = this._history
-    // Initialization phase - collect data for initial SMA calculation
+    // Initialization phase - not enough inputs for a first value yet
     if (!h.isFilled) {
-      if (isNaN(s[RMAState.SUM_FOR_FIRST_RMA])) {
-        s[RMAState.SUM_FOR_FIRST_RMA] = 0
-      }
-      // Accumulate values for first RMA
-      s[RMAState.SUM_FOR_FIRST_RMA] += h.last
-
       return null
     }
 
     if (isNaN(s[RMAState.CURRENT_RMA])) {
-      s[RMAState.CURRENT_RMA] = s[RMAState.SUM_FOR_FIRST_RMA] / this.interval
+      // The first RMA is the SMA of the first `interval` inputs, which is
+      // exactly what the history holds once it is filled. Averaging the buffer
+      // here is what includes the input that filled it: a running total kept
+      // inside the branch above is only updated while the buffer is NOT yet
+      // full, so it always missed that last input and averaged interval - 1
+      // values over interval.
+      const seed = average(h.array)
+      if (isNaN(seed)) {
+        // A gap inside the window: wait for `interval` clean inputs in a row
+        // rather than seeding from a partial window, or from NaN for good.
+        return null
+      }
+      s[RMAState.CURRENT_RMA] = seed
       return s[RMAState.CURRENT_RMA]
     }
 
