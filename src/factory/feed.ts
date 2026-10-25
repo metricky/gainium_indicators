@@ -12,7 +12,10 @@
  *                              SupportResistance, QFL, PSAR, SuperTrend,
  *                              ATR, PriorPivot, ADR, ATH
  *   - `{open, high, low, close}` → BullBear, MOM, ECD, DonchianChannels,
- *                                  OBFVG, LongWick
+ *                                  OBFVG, LongWick, OTELevels
+ *   - `{open, high, low, close, time}` → SessionLevels (`time` = `t`; a
+ *                                        candle without `t` is not grouped
+ *                                        into any session)
  *   - `{open, high, low, close, volume}` → VWMA, TVTA, MFI, BBW, BB, KC,
  *                                          KCPB, BBWP, BBPB, MAR, DIV, PC
  *   - `{high, low}`          → AO
@@ -47,6 +50,7 @@ import { MAR } from '../MAR/MAR'
 import { MFI } from '../MFI/MFI'
 import { MOM } from '../MOM/MOM'
 import { OBFVG } from '../OBFVG/OBFVG'
+import { OTELevels } from '../OTE/OTE'
 import { PC } from '../PC/PC'
 import { PSAR } from '../PSAR/PSAR'
 import { PriorPivot } from '../PriorPivot/PP'
@@ -54,6 +58,7 @@ import { QFL } from '../QFL/QFL'
 import { RMA } from '../RMA/RMA'
 import { RSI } from '../RSI/RSI'
 import { SMA } from '../SMA/SMA'
+import { SessionLevels } from '../Session/Session'
 import { StochasticOscillator } from '../STOCH/StochasticOscillator'
 import { StochasticRSI } from '../STOCH/StochasticRSI'
 import { SuperTrend } from '../SuperTrend/SuperTrend'
@@ -65,6 +70,7 @@ import { VO } from '../VO/VO'
 import { VWMA } from '../VWMA/VWMA'
 import { WMA } from '../WMA/WMA'
 import { WilliamsR } from '../WR/WR'
+import { unwrapSmoothed } from '../Smoothing/Smoothing'
 
 /** OHLCV candle — the superset of every indicator input shape we support. */
 export interface FeedCandle {
@@ -73,6 +79,12 @@ export interface FeedCandle {
   l: number
   c: number
   v: number
+  /**
+   * Candle OPEN time, ms since epoch. Only `SessionLevels` reads it, to group
+   * candles into sessions; without it the candle updates the latest price
+   * but belongs to no session. Callers that have the time must pass it.
+   */
+  t?: number
 }
 
 /**
@@ -83,11 +95,18 @@ export interface FeedCandle {
 
 export function feedCandle(indicator: any, candle: FeedCandle): void {
   if (!indicator) return
+  // A smoothed oscillator takes the input of the oscillator it wraps.
+  const input = candleInput(unwrapSmoothed(indicator), candle)
+  if (input !== undefined) {
+    indicator.next(input)
+  }
+}
 
+/** The input `indicator` expects for `candle`, or undefined if unknown. */
+function candleInput(indicator: any, candle: FeedCandle): unknown {
   // Volume-only
   if (indicator instanceof VO) {
-    indicator.next(candle.v)
-    return
+    return candle.v
   }
 
   // Close-only (numeric)
@@ -102,8 +121,7 @@ export function feedCandle(indicator: any, candle: FeedCandle): void {
     indicator instanceof WMA ||
     indicator instanceof HMA
   ) {
-    indicator.next(candle.c)
-    return
+    return candle.c
   }
 
   // HLC
@@ -124,8 +142,7 @@ export function feedCandle(indicator: any, candle: FeedCandle): void {
     indicator instanceof ADR ||
     indicator instanceof ATH
   ) {
-    indicator.next({ high: candle.h, low: candle.l, close: candle.c })
-    return
+    return { high: candle.h, low: candle.l, close: candle.c }
   }
 
   // OHLC
@@ -135,15 +152,26 @@ export function feedCandle(indicator: any, candle: FeedCandle): void {
     indicator instanceof ECD ||
     indicator instanceof DonchianChannels ||
     indicator instanceof OBFVG ||
-    indicator instanceof LongWick
+    indicator instanceof LongWick ||
+    indicator instanceof OTELevels
   ) {
-    indicator.next({
+    return {
       open: candle.o,
       high: candle.h,
       low: candle.l,
       close: candle.c,
-    })
-    return
+    }
+  }
+
+  // OHLC + open time
+  if (indicator instanceof SessionLevels) {
+    return {
+      open: candle.o,
+      high: candle.h,
+      low: candle.l,
+      close: candle.c,
+      time: candle.t ?? NaN,
+    }
   }
 
   // OHLCV
@@ -161,21 +189,20 @@ export function feedCandle(indicator: any, candle: FeedCandle): void {
     indicator instanceof DIV ||
     indicator instanceof PC
   ) {
-    indicator.next({
+    return {
       open: candle.o,
       high: candle.h,
       low: candle.l,
       close: candle.c,
       volume: candle.v,
-    })
-    return
+    }
   }
 
   // HL
   if (indicator instanceof AO) {
-    indicator.next({ high: candle.h, low: candle.l })
-    return
+    return { high: candle.h, low: candle.l }
   }
 
   // Unknown shape — do nothing. Caller will see `indicator.result` stay null.
+  return undefined
 }

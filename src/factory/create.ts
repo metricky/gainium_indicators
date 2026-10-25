@@ -38,6 +38,7 @@ import {
   MFI,
   MOM,
   OBFVG,
+  OTELevels,
   PC,
   PSAR,
   PriorPivot,
@@ -45,6 +46,8 @@ import {
   RMA,
   RSI,
   SMA,
+  SessionLevels,
+  SessionRuleEnum,
   StochasticOscillator,
   StochasticRSI,
   SuperTrend,
@@ -61,8 +64,15 @@ import {
   IndicatorConfig,
   IndicatorEnum,
   MAEnum,
+  Percentile,
   RangeType,
+  Smoothing,
 } from '../types/config'
+import {
+  SmoothedIndicator,
+  isSmoothableIndicator,
+  resolveSmoothing,
+} from '../Smoothing/Smoothing'
 
 /**
  * Constructs the indicator described by `config`. Returns `null` if the
@@ -71,6 +81,29 @@ import {
  */
 
 export function createIndicator(config: IndicatorConfig): any {
+  const smoothing = isSmoothableIndicator(config.type)
+    ? resolveSmoothing(
+        (config as Smoothing).smoothing,
+        (config as Smoothing).smoothingLength,
+      )
+    : null
+  if (!smoothing) {
+    return createBaseIndicator(config)
+  }
+  // The oscillator is built without percentile; the wrapper smooths its main
+  // line and ranks the smoothed line instead.
+  const pct = config as Percentile
+  return new SmoothedIndicator(
+    createBaseIndicator({ ...config, percentile: false } as IndicatorConfig),
+    smoothing,
+    pct.percentile,
+    +(pct.percentileLookback ?? '0'),
+    +(pct.percentilePercentage ?? '0'),
+  )
+}
+
+/** The unsmoothed indicator for `config` (smoothing fields ignored). */
+function createBaseIndicator(config: IndicatorConfig): any {
   switch (config.type) {
     case IndicatorEnum.st:
       return new SuperTrend(config.factor, config.atrLength)
@@ -355,6 +388,20 @@ export function createIndicator(config: IndicatorConfig): any {
 
     case IndicatorEnum.lw:
       return new LongWick(config.lwThreshold ?? 2, config.lwMaxDuration ?? 1000)
+
+    case IndicatorEnum.ote:
+      return new OTELevels(config.oteLeftBars ?? 10, config.oteMinLegSize ?? 1)
+
+    case IndicatorEnum.session:
+      // In / out sessions are clock filters, not indicators.
+      if (config.sessionRule !== SessionRuleEnum.levels) {
+        return null
+      }
+      return new SessionLevels(config.sessionDays ?? [1, 2, 3, 4, 5], {
+        start: config.sessionStart,
+        end: config.sessionEnd,
+        timezone: config.sessionTimezone,
+      })
 
     default:
       return null

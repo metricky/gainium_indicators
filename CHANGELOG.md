@@ -5,6 +5,133 @@ All notable changes to the Gainium Technical Indicators library will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-10-25
+
+### Fixed
+
+- **MAR with a VWMA leg gave no values when the type was lower case.** The
+  VWMA legs were fed the candle only for `'VWMA'`; bot settings send `'vwma'`,
+  so the leg got a bare number and the ratio never formed. The type is now
+  matched in either case.
+- **VWMA took twice its length to warm up.** The volume SMA was skipped while
+  the volume-price SMA warmed up, so it started a window late. Both now update
+  on every candle and VWMA gives its first value on its length-th candle, like
+  SMA. Values after warm-up are unchanged.
+
+## [1.9.0] - 2026-10-24
+
+### Added
+
+- **Current session midpoint (`SessionLevelEnum.curMid`).** A new Price
+  levels value: (highest high + lowest low) / 2 of the session in progress
+  so far, latest candle included, so it moves whenever the session prints a
+  new high or low. NaN outside a session and on candles without a time, like
+  `curOpen`. Reported as `SessionLevelsResult.curMid` and read by
+  `sessionLevelValue`; `sessionLevelsCondition` crossings against it follow
+  the usual rules (within one session they count, across a rollover they do
+  not). A session already in progress when the data starts still reports its
+  midpoint as seen so far. No new indicator state: the running high and low
+  were already tracked, so exported states from 1.8.0 restore unchanged.
+
+## [1.8.0] - 2026-10-24
+
+### Added
+
+- **Session price levels (`SessionLevels`, `SessionRuleEnum.levels`).** For
+  the Session indicator's new Price levels rule: groups candles into
+  sessions by their open time (same window as `isInSession` with rule `in`)
+  and reports the open, high, low, close and midpoint of the last completed
+  session, the open of the session in progress (NaN outside a session), the
+  latest close, `inSession` (1 / 0) and the current and previous session
+  keys. A session already in progress when the data starts is never used as
+  the previous session. Input is `OHLCT` (OHLC + candle open time in ms).
+  Registered in `createIndicator` (only for `sessionRule: 'levels'`; the
+  in / out rules stay factory-less clock filters), `getWarmupCandles` (1500)
+  and `feedCandle`.
+- `FeedCandle.t` — optional candle open time (ms). `SessionLevels` reads it
+  to group candles; a candle without it updates the price but belongs to no
+  session.
+- `sessionKey(timestamp, days, hours)` — `yyyymmdd` of the local day a
+  session opened, or `null` outside the window. `isInSession` is now
+  expressed on top of it, with unchanged results.
+- `SessionLevelEnum` and `sessionLevelValue(result, level)` — the values a
+  Price levels condition compares (`prevOpen`, `prevHigh`, `prevMid`,
+  `prevLow`, `prevClose`, `curOpen`, `price`).
+- `sessionLevelsCondition(last, prev, { a, b, condition })` — the
+  bot-condition decision (`gt`, `lt`, `cu`, `cd`), shared by the live engine
+  and the backtester. False outside the session, for a missing value or
+  A = B; a crossing only counts when both bars are in the same session and
+  see the same previous session.
+
+## [1.7.0] - 2026-10-24
+
+### Added
+
+- **Discount / Premium OTE Levels (`OTELevels`, `IndicatorEnum.ote`).**
+  Tracks the latest valid price leg between a swing low and a swing high
+  (TradingView pivots: `oteLeftBars` to the left, one bar to the right) that
+  is at least `oteMinLegSize` percent long, re-anchoring on the remaining
+  swings when price trades through the leg's extreme. The result is the leg
+  (`high`, `low`, `direction`: 1 bullish, -1 bearish, NaN without a leg)
+  plus `price`. `oteLevelPrice(result, level)` gives the price of a
+  retracement level (0 = the leg's end, 1 = its origin, 0.705 = the OTE
+  sweet spot). Registered in `createIndicator`, `getWarmupCandles` (1000)
+  and `feedCandle` (OHLC).
+- `oteCondition(last, prev, { level, leg, condition })` — the bot-condition
+  decision (close vs a level of the latest leg: `gt`, `lt`, or a `cu` / `cd`
+  crossing on the same leg; `leg` filters `bullish` / `bearish` / `any`),
+  shared by the live engine and the backtester so both fire on the same bars.
+
+## [1.6.0] - 2026-10-23
+
+### Added
+
+- **Session hours.** `isInSession(timestamp, days, rule, hours?)` takes an
+  optional `{ start, end, timezone }` window: local `HH:MM` times in an IANA
+  time zone (default `UTC`), so a session keeps its local clock across
+  daylight saving. `end` before `start` is an overnight session whose
+  after-midnight part belongs to the day it opened, and the weekday is read
+  in the session's zone. Without hours (or with invalid or equal times) the
+  whole day counts, exactly as before. An unknown zone falls back to UTC.
+- `parseSessionTime` and `zonedDayAndMinutes` helpers.
+
+## [1.5.0] - 2026-10-12
+
+### Added
+
+- **Optional smoothing of single-line oscillators.** The configs of `RSI`,
+  `CCI`, `MFI`, `WilliamsR` (`WR`), `UltimateOscillator` (`UO`), `MOM`,
+  `AO`, `ADX`, `BBPB`, `KeltnerChannelPB` (`KCPB`), `BollingerBandsWidth`
+  (`BBW`), `VO` and `MAR` accept `smoothing` (`'sma' | 'ema' | 'wma' |
+  'dema' | 'tema' | 'hma' | 'rma'`, case-insensitive) and `smoothingLength`
+  (1 to 1000). When both are set, `createIndicator` returns a
+  `SmoothedIndicator`: the oscillator, built without percentile, feeds its
+  `value` through that moving average (the library's own classes). The
+  result's `value` is the smoothed line, the new `raw` field is the
+  oscillator's own value on the same bar, percentile mode ranks the smoothed
+  line, and a `trend` reported by the oscillator (MAR trend filter) is passed
+  through. Nothing is emitted until the average has warmed up. A missing,
+  `'none'`, `'vwma'`, `'price'` or unrecognised type, or a missing, zero or
+  out-of-range length, leaves smoothing off. Other indicator types ignore
+  the fields.
+- `getWarmupCandles` adds the average's run-up for those types: one length
+  for SMA/EMA/WMA/RMA, two for DEMA, three for TEMA,
+  `length + ceil(length / 2) + ceil(sqrt(length))` for HMA.
+- `feedCandle` feeds a `SmoothedIndicator` the input of the oscillator it
+  wraps.
+- New exports: `SmoothedIndicator`, `SmoothedResult`, `Smoothing`,
+  `SmoothingType`, `SmoothingConfig`, `SMOOTHING_TYPES`,
+  `SMOOTHING_MAX_LENGTH`, `SMOOTHABLE_INDICATORS`, `isSmoothableIndicator()`,
+  `resolveSmoothing()`, `getSmoothingWarmup()`, `createSmoother()` and
+  `unwrapSmoothed()`.
+
+### Unchanged
+
+- With smoothing off, `createIndicator` returns the same oscillator as
+  before; output series, exported state and warm-up are identical (pinned by
+  golden results recorded from 1.4.0 for every type above). The oscillator
+  classes themselves are not modified.
+
 ## [1.4.0] - 2026-09-19
 
 ### Fixed

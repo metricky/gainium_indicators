@@ -1,5 +1,6 @@
 import { DEMA } from '../DEMA/DEMA'
 import { EMA } from '../EMA/EMA'
+import { SessionRuleEnum } from '../Session/Session'
 
 // ─── Existing: MACDConfig (kept for backwards compatibility with earlier
 //     consumers that imported it directly) ─────────────────────────────────
@@ -63,6 +64,7 @@ export enum IndicatorEnum {
   obfvg = 'OBFVG',
   session = 'SESSION',
   lw = 'LW',
+  ote = 'OTE',
 }
 
 /** Moving-average variants. Consumed by `ma` / `bb` / `bbw` / `mar` / `kc`. */
@@ -99,6 +101,17 @@ export type Percentile = {
   percentilePercentage?: number
 }
 
+/**
+ * Mix-in for the single-line oscillators whose main line can be smoothed
+ * (see `SMOOTHABLE_INDICATORS`). Ignored on every other indicator type.
+ */
+export type Smoothing = {
+  /** 'sma' | 'ema' | 'wma' | 'dema' | 'tema' | 'hma' | 'rma' (any case); anything else = off */
+  smoothing?: string | null
+  /** 1..1000; missing, null, 0 or out of range = off */
+  smoothingLength?: number | null
+}
+
 /** Mix-in for indicators that gate signals on a trend filter. */
 export type TrendFilter = {
   trendFilter?: boolean
@@ -127,6 +140,17 @@ export type DivergenceOscillators =
 
 export type IndicatorConfig =
   | { type: IndicatorEnum.lw; lwThreshold: number; lwMaxDuration: number }
+  | { type: IndicatorEnum.ote; oteLeftBars: number; oteMinLegSize: number }
+  | {
+      // Only the Price levels rule has an indicator instance; the in / out
+      // rules are pure clock filters (`isInSession`) with no factory entry.
+      type: IndicatorEnum.session
+      sessionRule: SessionRuleEnum.levels | 'levels'
+      sessionDays: number[]
+      sessionStart?: string
+      sessionEnd?: string
+      sessionTimezone?: string
+    }
   | { type: IndicatorEnum.obfvg }
   | { type: IndicatorEnum.dc; length: number }
   | {
@@ -167,12 +191,14 @@ export type IndicatorConfig =
       mar2type: MAEnum
       mar2length: number
     } & Percentile &
-      TrendFilter)
+      TrendFilter &
+      Smoothing)
   | ({
       type: IndicatorEnum.mom
       interval: number
       source: string
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | {
       type: IndicatorEnum.bbwp
       interval: number
@@ -190,14 +216,16 @@ export type IndicatorConfig =
         | IndicatorEnum.atr
         | IndicatorEnum.adr
       interval: number
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | ({
       type: IndicatorEnum.bbw | IndicatorEnum.bb | IndicatorEnum.bbpb
       interval: number
       bbwMult?: number
       bbwMa?: MAEnum
       bbwMaLength?: number
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | ({
       type: IndicatorEnum.kc | IndicatorEnum.kcpb
       interval: number
@@ -205,7 +233,8 @@ export type IndicatorConfig =
       ma?: MAEnum
       range?: RangeType
       rangeLength?: number
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | ({
       type: IndicatorEnum.macd
       longInterval: number
@@ -222,7 +251,8 @@ export type IndicatorConfig =
     }
   | ({
       type: IndicatorEnum.ao
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | {
       type: IndicatorEnum.stochRSI
       interval: number
@@ -235,7 +265,8 @@ export type IndicatorConfig =
       fast: number
       middle: number
       slow: number
-    } & Percentile)
+    } & Percentile &
+      Smoothing)
   | {
       type: IndicatorEnum.ic
       conversionPeriods: number
@@ -266,5 +297,10 @@ export type IndicatorConfig =
       inc: number
       max: number
     }
-  | ({ type: IndicatorEnum.vo; voShort: number; voLong: number } & Percentile)
+  | ({
+      type: IndicatorEnum.vo
+      voShort: number
+      voLong: number
+    } & Percentile &
+      Smoothing)
   | { type: IndicatorEnum.ecd }
