@@ -22,6 +22,8 @@ import {
   BollingerBandsWidth,
   BullBear,
   CCI,
+  CandleSourceEnum,
+  Candle,
   DEMA,
   DIV,
   DIVUsableOscillators,
@@ -30,24 +32,31 @@ import {
   EMA,
   HMA,
   IchimokuCloud,
+  KDJ,
   KeltnerChannel,
   KeltnerChannelPB,
   LongWick,
   MACD,
   MAR,
+  MATrendFilter,
   MFI,
   MOM,
   OBFVG,
   OTELevels,
+  OrderBlocks,
   PC,
   PSAR,
   PriorPivot,
   QFL,
   RMA,
+  McGinley,
   RSI,
   SMA,
+  resolveOBSwingLength,
+  resolveSqueezeSettings,
   SessionLevels,
   SessionRuleEnum,
+  Squeeze,
   StochasticOscillator,
   StochasticRSI,
   SuperTrend,
@@ -56,6 +65,8 @@ import {
   TVTA,
   UltimateOscillator,
   VO,
+  VWAP,
+  VWAPAnchorEnum,
   VWMA,
   WMA,
   WilliamsR,
@@ -206,6 +217,7 @@ function createBaseIndicator(config: IndicatorConfig): any {
         config.percentile,
         +(config.percentileLookback ?? '0'),
         +(config.percentilePercentage ?? '0'),
+        config.dmi === true,
       )
 
     case IndicatorEnum.bbw: {
@@ -347,27 +359,33 @@ function createBaseIndicator(config: IndicatorConfig): any {
         config.laggingSpan,
       )
 
-    case IndicatorEnum.ma:
-      switch (config.maType) {
-        case MAEnum.ema:
-          return new EMA(config.interval)
-        case MAEnum.sma:
-          return new SMA(config.interval)
-        case MAEnum.wma:
-          return new WMA(config.interval)
-        case MAEnum.hma:
-          return new HMA(config.interval)
-        case MAEnum.vwma:
-          return new VWMA(config.interval)
-        case MAEnum.dema:
-          return new DEMA(config.interval)
-        case MAEnum.tema:
-          return new TEMA(config.interval)
-        case MAEnum.rma:
-          return new RMA(config.interval)
-        default:
-          return null
+    case IndicatorEnum.ma: {
+      const ma = createMovingAverage(config.maType, config.interval)
+      // The trend filter wraps the plain MA; without it the MA is returned
+      // as is, so its result stays a bare number.
+      if (!config.trendFilter || !ma) {
+        return ma
       }
+      return new MATrendFilter(
+        ma,
+        config.trendFilterLookback,
+        config.trendFilterValue,
+        config.trendFilterType,
+      )
+    }
+
+    case IndicatorEnum.kdj:
+      return new KDJ(
+        config.kdjLength ?? 9,
+        config.kdjKSmooth ?? 3,
+        config.kdjDSmooth ?? 3,
+      )
+
+    case IndicatorEnum.vwap:
+      return new VWAP(
+        config.vwapAnchor ?? VWAPAnchorEnum.day,
+        config.vwapBandMultiplier ?? 1,
+      )
 
     case IndicatorEnum.tv:
       return new TVTA(config.checkLevel, config.useAsEntryExitPoints)
@@ -403,6 +421,48 @@ function createBaseIndicator(config: IndicatorConfig): any {
         timezone: config.sessionTimezone,
       })
 
+    case IndicatorEnum.candle:
+      return new Candle(config.source ?? CandleSourceEnum.heikinAshi)
+
+    case IndicatorEnum.ob:
+      return new OrderBlocks(resolveOBSwingLength(config.swingLength))
+
+    case IndicatorEnum.sqz: {
+      const r = resolveSqueezeSettings(
+        config.length,
+        config.bbMult,
+        config.kcLength,
+        config.kcMult,
+      )
+      return new Squeeze(r.length, r.bbMult, r.kcLength, r.kcMult)
+    }
+
+    default:
+      return null
+  }
+}
+
+/** The plain moving average of `IndicatorEnum.ma`; null for an unknown type. */
+function createMovingAverage(maType: MAEnum, interval: number): any {
+  switch (maType) {
+    case MAEnum.ema:
+      return new EMA(interval)
+    case MAEnum.sma:
+      return new SMA(interval)
+    case MAEnum.wma:
+      return new WMA(interval)
+    case MAEnum.hma:
+      return new HMA(interval)
+    case MAEnum.vwma:
+      return new VWMA(interval)
+    case MAEnum.dema:
+      return new DEMA(interval)
+    case MAEnum.tema:
+      return new TEMA(interval)
+    case MAEnum.rma:
+      return new RMA(interval)
+    case MAEnum.mcginley:
+      return new McGinley(interval)
     default:
       return null
   }
