@@ -22,7 +22,8 @@ Map: [`../0-knowledge/ARCHITECTURE.md`](../0-knowledge/ARCHITECTURE.md).
   `@gainium/indicators`). It's the **canonical** TA lib — the unused `trading-signals-tv-suitable` lib was removed.
 - A change to indicator output (values, `IndicatorEnum`, warmup math) silently changes bot signals,
   backtests, and archived indicator results across every consumer. Treat the public API + numeric output as a
-  contract; bump the version and coordinate consumers.
+  contract; release it with a `.changes/` entry (`minor` for an API change — never hand-edit the
+  version) and coordinate consumers.
 
 ## Rules
 - Pure library: no ports, no I/O. Keep it deterministic and side-effect-free.
